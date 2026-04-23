@@ -31,6 +31,15 @@ import requests
 from google import genai
 from google.genai import types
 
+# Windows consoles default to cp1252 — force utf-8 so the agent's prose
+# (→, ×, em-dashes, emotes) doesn't crash on output.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 from fetch_chat import (
     CLIENT_ID,
     fetch_page,
@@ -550,6 +559,33 @@ def _to_jsonable(v):
     return v
 
 
+def _retry_delay_from(err):
+    """Parse Gemini 429's retryDelay field ('15s') -> seconds. Fallback 30s."""
+    msg = str(err)
+    m = re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s", msg)
+    if m:
+        return min(60.0, float(m.group(1)) + 1.0)
+    return 30.0
+
+
+def _open_stream(client, model, contents, config, on_token):
+    """generate_content_stream with polite retry on 429 rate-limit."""
+    for attempt in range(3):
+        try:
+            return client.models.generate_content_stream(
+                model=model, contents=contents, config=config,
+            )
+        except Exception as e:
+            s = str(e)
+            if "429" in s or "RESOURCE_EXHAUSTED" in s:
+                delay = _retry_delay_from(e)
+                on_token(f"\n  [rate-limited — waiting {delay:.0f}s then retrying]\n")
+                time.sleep(delay)
+                continue
+            raise
+    raise RuntimeError("Exhausted retries on rate-limit")
+
+
 def chat_turn(client, model, contents, on_token):
     """Stream one turn against Gemini, execute any function calls, loop until done."""
     config = types.GenerateContentConfig(
@@ -561,9 +597,7 @@ def chat_turn(client, model, contents, on_token):
     while True:
         text_agg = ""
         fn_calls = []
-        stream = client.models.generate_content_stream(
-            model=model, contents=contents, config=config,
-        )
+        stream = _open_stream(client, model, contents, config, on_token)
         for chunk in stream:
             cand_list = getattr(chunk, "candidates", None) or []
             for cand in cand_list:

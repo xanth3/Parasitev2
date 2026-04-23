@@ -71,7 +71,11 @@ python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 15
 python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
 ```
 
-**Why Gemini:** the project ships to users, and Gemini 2.5 Flash has a generous free tier (1500 req/day, 15 RPM) — no payment method required. Anthropic's API is pay-as-you-go. The owner of this repo personally uses Claude Code for their own analyses (hitting the raw scripts directly) and reserves Symbiote for general-public distribution.
+**Why Gemini:** the project ships to users, and Gemini 2.5 Flash has a free tier — no payment method required. Anthropic's API is pay-as-you-go.
+
+**Free-tier limits (verified live 2026-04-23):** Gemini 2.5 Flash free tier is **5 RPM** per project (error: `generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5`) plus a daily cap. A single Symbiote turn often fires 2 API calls (tool dispatch + result synthesis), so a heavy conversation hits this quickly. `chat_turn` catches 429s, parses the `retryDelay` field from the error, sleeps that long, and retries up to 3 times (`_open_stream` / `_retry_delay_from`). Users see a `[rate-limited — waiting Ns then retrying]` inline while it waits.
+
+**Ownership split:** Gemini is for **general-public distribution** — anyone can clone the repo, grab a free AI Studio key, and run `symbiote.py`. The repo owner personally uses Claude Code (this file's reader) for their own analyses, hitting the raw scripts directly via Bash/Read tools — no Gemini quota, no chatbot intermediary. That's why we keep the raw scripts fully functional alongside `symbiote.py`.
 
 ## Archive layout
 
@@ -113,10 +117,14 @@ System prompt in `SYSTEM_PROMPT`. Tool schemas in `TOOLS` (JSON Schema; `paramet
 - In the streaming loop, text deltas and function-call parts both arrive through `chunk.candidates[0].content.parts`. Text parts can be split across chunks; function-call parts arrive fully formed. Aggregate text into `text_agg`, collect function_calls into `fn_calls`, then construct one `types.Content(role="model", parts=...)` per turn.
 - `fc.args` is a proto `MapComposite`, not a dict — route through `_to_jsonable` before `json.dumps` or kwarg-splatting.
 - Disable auto function calling (`AutomaticFunctionCallingConfig(disable=True)`) because we manage the loop manually.
+- Rate-limit retries are wrapped in `_open_stream` — it catches the 429, reads the `retryDelay` from the error body, sleeps, and retries. Don't call `generate_content_stream` directly from `chat_turn` or you lose this.
+
+**Windows console gotcha:** Gemini's prose uses `→`, `×`, em-dashes, and emotes that crash `cp1252` stdout. Top of `symbiote.py` reconfigures `sys.stdout` / `sys.stderr` to `utf-8` with `errors="replace"` so a rogue glyph never kills a session. Leave this in even if the module looks cross-platform clean — without it, Windows Terminal users hit `UnicodeEncodeError` on the first `→`.
 
 ## Conventions
 
 - Each script is single-file. No premature module split.
 - stdlib + `matplotlib` + `requests` + `google-genai` only. Don't add pandas/numpy — `collections.Counter` is enough for binning.
-- Model choice: Gemini 2.5 Flash default (free, fast), Gemini 2.5 Pro behind `--pro` for deeper analysis at the cost of a tighter quota.
+- Model choice: Gemini 2.5 Flash default (free, fast), Gemini 2.5 Pro behind `--pro` for deeper analysis at the cost of a tighter quota. `--model` accepts an arbitrary override if/when Google ships a better flash-tier model.
+- **Live-tested 2026-04-23** — three-turn scripted conversation (list_vods → get_peaks → analyze_window) dispatched all tools correctly on the zackrawrr VOD and produced the same "Cinema ×63, SCATTER, ASSEMBLE, SAME SHIRT" synthesis as the manual analysis. Interpretive quality on clip-ready output is strong at `gemini-2.5-flash`; no need to default to `--pro`.
 - No sentiment/LLM-classification layer yet. If added later, put it in a separate module that consumes the `peaks.csv` from an archive dir — keep the core pipeline fast and offline.
