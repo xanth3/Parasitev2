@@ -14,8 +14,8 @@ Three standalone scripts plus one agent entrypoint. No package.
 - [fetch_chat.py](fetch_chat.py) — pulls the full chat from a VOD URL/ID via Twitch's public GraphQL API and writes a TwitchDownloader-compatible `chat_<id>.json`.
 - [heatmap.py](heatmap.py) — consumes that JSON, emits a PNG histogram, a top-N terminal table, and `peaks.csv`.
 - [peaks_detail.py](peaks_detail.py) — expands each peak into a Markdown report with top tokens and sampled messages.
-- [symbiote.py](symbiote.py) — the Symbiote agent. REPL + Claude tool-use loop. Imports from the three scripts above.
-- [requirements.txt](requirements.txt) — `matplotlib`, `requests`, `anthropic`. Everything else is stdlib.
+- [symbiote.py](symbiote.py) — the Symbiote agent. REPL + Gemini function-calling loop. Imports from the three scripts above.
+- [requirements.txt](requirements.txt) — `matplotlib`, `requests`, `google-genai`. Everything else is stdlib.
 
 ## Why fetch_chat.py exists
 
@@ -60,15 +60,18 @@ Optional `--info <yt-dlp .info.json>` reads the `chapters` array and:
 pip install -r requirements.txt
 
 # The agent (recommended — orchestrates fetch + analysis from natural language)
-export ANTHROPIC_API_KEY=sk-ant-...
+# Get a free key at https://aistudio.google.com/app/apikey
+setx GEMINI_API_KEY "AIza..."           # PowerShell, close + reopen terminal
 python symbiote.py
-python symbiote.py --opus          # Claude Opus 4.7 for deeper analysis
+python symbiote.py --pro                # Gemini 2.5 Pro for deeper analysis
 
-# Raw scripts (fallback / CI)
+# Raw scripts (fallback / CI / power-user path)
 python fetch_chat.py https://www.twitch.tv/videos/<id> --max-seconds 23766
 python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 15
 python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
 ```
+
+**Why Gemini:** the project ships to users, and Gemini 2.5 Flash has a generous free tier (1500 req/day, 15 RPM) — no payment method required. Anthropic's API is pay-as-you-go. The owner of this repo personally uses Claude Code for their own analyses (hitting the raw scripts directly) and reserves Symbiote for general-public distribution.
 
 ## Archive layout
 
@@ -91,7 +94,7 @@ Path helpers in [symbiote.py](symbiote.py) (`chat_path`, `info_path`, `heatmap_p
 
 ## Symbiote agent tools
 
-Six tools exposed to Claude via the Messages API tool-use loop in `symbiote.py`:
+Six tools exposed to Gemini via function-declarations in `symbiote.py`:
 
 | Tool | Purpose |
 | --- | --- |
@@ -102,13 +105,18 @@ Six tools exposed to Claude via the Messages API tool-use loop in `symbiote.py`:
 | `search_chat` | Regex-search the chat. Returns total matches + density peaks. |
 | `open_heatmap` | `os.startfile` the VOD's heatmap.png (regenerates via `heatmap.py` if missing). |
 
-System prompt in `SYSTEM_PROMPT`. Tool schemas in `TOOLS`. Execution dispatch in `run_tool`. Streaming tool loop in `chat_turn`.
+System prompt in `SYSTEM_PROMPT`. Tool schemas in `TOOLS` (JSON Schema; `parameters` field, not `input_schema`). Execution dispatch in `run_tool` (filters kwargs to the tool function's signature, so Gemini passing an unexpected arg won't TypeError). Streaming function-call loop in `chat_turn`.
 
-**Prompt caching:** `cache_control: {type: "ephemeral"}` on the system block — tools + system render together (tools render first), so the marker caches both as a single prefix. Current prefix is ~2K tokens, borderline for Sonnet 4.6's 2048-token minimum cache size; if tools or system prompt grow, cache hits will kick in.
+**Gemini specifics worth remembering when touching `chat_turn`:**
+
+- Build `contents` as a list of `types.Content(role="user"|"model", parts=[...])`. Tool results go back as `role="user"` with `types.Part.from_function_response(name, response={"result": ...})`.
+- In the streaming loop, text deltas and function-call parts both arrive through `chunk.candidates[0].content.parts`. Text parts can be split across chunks; function-call parts arrive fully formed. Aggregate text into `text_agg`, collect function_calls into `fn_calls`, then construct one `types.Content(role="model", parts=...)` per turn.
+- `fc.args` is a proto `MapComposite`, not a dict — route through `_to_jsonable` before `json.dumps` or kwarg-splatting.
+- Disable auto function calling (`AutomaticFunctionCallingConfig(disable=True)`) because we manage the loop manually.
 
 ## Conventions
 
 - Each script is single-file. No premature module split.
-- stdlib + `matplotlib` + `requests` + `anthropic` only. Don't add pandas/numpy — `collections.Counter` is enough for binning.
-- Model choice: Sonnet 4.6 default, Opus 4.7 behind `--opus`. Don't downgrade to Haiku — tool orchestration needs real reasoning.
+- stdlib + `matplotlib` + `requests` + `google-genai` only. Don't add pandas/numpy — `collections.Counter` is enough for binning.
+- Model choice: Gemini 2.5 Flash default (free, fast), Gemini 2.5 Pro behind `--pro` for deeper analysis at the cost of a tighter quota.
 - No sentiment/LLM-classification layer yet. If added later, put it in a separate module that consumes the `peaks.csv` from an archive dir — keep the core pipeline fast and offline.

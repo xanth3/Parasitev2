@@ -10,13 +10,15 @@ highest-engagement minutes so you can cut clips without rewatching.
 ## Symbiote CLI (recommended)
 
 Natural-language interface — drop a VOD link, ask questions, get clip-ready
-answers. Powered by Claude.
+answers. Powered by Gemini (free tier).
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-ant-...   # PowerShell: $env:ANTHROPIC_API_KEY = '...'
-python symbiote.py                    # defaults to Sonnet 4.6
-python symbiote.py --opus             # Opus 4.7 for deeper analysis
+# Get a free key at https://aistudio.google.com/app/apikey
+setx GEMINI_API_KEY "AIza..."         # PowerShell (close + reopen terminal)
+# or: export GEMINI_API_KEY='AIza...'  # bash
+python symbiote.py                    # defaults to Gemini 2.5 Flash
+python symbiote.py --pro              # Gemini 2.5 Pro (smaller free quota)
 ```
 
 Example session:

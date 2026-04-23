@@ -1,6 +1,6 @@
 """Symbiote — the conversational agent inside the Parasite toolkit.
 
-REPL + tool-using agent powered by Claude. Talk to it in natural language:
+REPL + tool-using agent powered by Gemini. Talk to it in natural language:
     > gimme data on https://www.twitch.tv/videos/2754474282
     > what's going on at 2:57?
     > search for everyone yelling Cinema
@@ -10,8 +10,9 @@ The Parasite is the system that latches onto Twitch VODs and pulls chat via
 GraphQL. The Symbiote is the friendly half — it lives in your terminal, picks
 the right Parasite tool for each question, and gives clip-ready answers.
 
-Requires ANTHROPIC_API_KEY in the environment. Model defaults to Sonnet 4.6;
-pass --opus for Opus 4.7 on deeper analysis runs.
+Requires GEMINI_API_KEY (or GOOGLE_API_KEY) in the environment. Get one free
+at https://aistudio.google.com/app/apikey. Model defaults to Gemini 2.5 Flash;
+pass --pro for Gemini 2.5 Pro on deeper analysis runs (smaller free quota).
 """
 
 import argparse
@@ -26,8 +27,9 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-import anthropic
 import requests
+from google import genai
+from google.genai import types
 
 from fetch_chat import (
     CLIENT_ID,
@@ -436,7 +438,7 @@ TOOLS = [
     {
         "name": "fetch_vod",
         "description": "Download the full chat history for a Twitch VOD. Takes 3-4 minutes for a 6-hour stream. Caches to chat_<id>.json — subsequent calls for the same VOD return instantly. Call this first when the user drops a new URL.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "vod": {"type": "string", "description": "VOD URL or numeric ID"},
@@ -448,12 +450,12 @@ TOOLS = [
     {
         "name": "list_vods",
         "description": "List cached VODs in the current workspace. Use when the user asks what's available or doesn't specify which VOD.",
-        "input_schema": {"type": "object", "properties": {}},
+        "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "get_peaks",
         "description": "Find the minutes with the most chat activity. Returns ranked peaks with timestamps, message counts, and chapter labels. Use for 'top moments', 'hottest parts', 'where was hype'.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "vod_id": {"type": "string", "description": "VOD numeric ID"},
@@ -467,7 +469,7 @@ TOOLS = [
     {
         "name": "analyze_window",
         "description": "Get chat signal for a specific timestamp — top tokens/emotes and sample messages. Use this to figure out what was happening at a peak or any moment the user asks about.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "vod_id": {"type": "string"},
@@ -482,7 +484,7 @@ TOOLS = [
     {
         "name": "search_chat",
         "description": "Search chat for a regex pattern. Returns total matches plus the top buckets where the pattern spiked. Use for 'when did people spam X', 'heatmap of Y word'.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {
                 "vod_id": {"type": "string"},
@@ -497,7 +499,7 @@ TOOLS = [
     {
         "name": "open_heatmap",
         "description": "Open the heatmap PNG for a VOD in the default image viewer. Regenerates if missing.",
-        "input_schema": {
+        "parameters": {
             "type": "object",
             "properties": {"vod_id": {"type": "string"}},
             "required": ["vod_id"],
@@ -517,70 +519,109 @@ TOOL_FUNCS = {
 
 
 def run_tool(name, args):
+    """Execute a tool by name, filtering kwargs to what the function accepts."""
     fn = TOOL_FUNCS.get(name)
     if not fn:
         return {"error": f"Unknown tool {name!r}"}
+    import inspect
     try:
-        return fn(**args)
-    except TypeError as e:
-        return {"error": f"Bad args: {e}"}
+        sig = inspect.signature(fn)
+        accepted = set(sig.parameters)
+        clean = {k: v for k, v in (args or {}).items() if k in accepted}
+        return fn(**clean)
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
-def chat_turn(client, model, messages, on_token):
-    """Stream one turn, execute any tools, loop until Claude is done."""
+def _gemini_tools():
+    """Wrap our TOOLS list in a Gemini Tool object."""
+    return [types.Tool(function_declarations=TOOLS)]
+
+
+def _to_jsonable(v):
+    """Normalize google proto MapComposite / ListComposite to plain Python."""
+    if hasattr(v, "items"):
+        return {k: _to_jsonable(vv) for k, vv in v.items()}
+    if isinstance(v, (list, tuple)) or (hasattr(v, "__iter__") and not isinstance(v, (str, bytes))):
+        try:
+            return [_to_jsonable(x) for x in v]
+        except TypeError:
+            pass
+    return v
+
+
+def chat_turn(client, model, contents, on_token):
+    """Stream one turn against Gemini, execute any function calls, loop until done."""
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        tools=_gemini_tools(),
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
     while True:
-        with client.messages.stream(
-            model=model,
-            max_tokens=4096,
-            system=[{
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }],
-            tools=TOOLS,
-            messages=messages,
-        ) as stream:
-            for event in stream:
-                if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                    on_token(event.delta.text)
-            response = stream.get_final_message()
+        text_agg = ""
+        fn_calls = []
+        stream = client.models.generate_content_stream(
+            model=model, contents=contents, config=config,
+        )
+        for chunk in stream:
+            cand_list = getattr(chunk, "candidates", None) or []
+            for cand in cand_list:
+                parts = getattr(getattr(cand, "content", None), "parts", None) or []
+                for part in parts:
+                    txt = getattr(part, "text", None)
+                    if txt:
+                        on_token(txt)
+                        text_agg += txt
+                    fc = getattr(part, "function_call", None)
+                    if fc and getattr(fc, "name", None):
+                        fn_calls.append(fc)
 
-        messages.append({"role": "assistant", "content": response.content})
+        # Model's turn goes into history.
+        model_parts = []
+        if text_agg:
+            model_parts.append(types.Part(text=text_agg))
+        for fc in fn_calls:
+            model_parts.append(types.Part(function_call=fc))
+        if model_parts:
+            contents.append(types.Content(role="model", parts=model_parts))
 
-        if response.stop_reason != "tool_use":
+        if not fn_calls:
             return
 
-        tool_uses = [b for b in response.content if b.type == "tool_use"]
-        results = []
-        for tu in tool_uses:
-            on_token(f"\n  · {tu.name}({', '.join(f'{k}={v!r}' for k, v in list(tu.input.items())[:2])}) …")
-            out = run_tool(tu.name, tu.input)
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": tu.id,
-                "content": json.dumps(out, default=str),
-            })
+        # Execute tools, feed results back as a "user"-role turn of function_response parts.
+        result_parts = []
+        for fc in fn_calls:
+            args = _to_jsonable(getattr(fc, "args", {}) or {})
+            preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:2])
+            on_token(f"\n  · {fc.name}({preview}) …")
+            result = run_tool(fc.name, args)
+            result_parts.append(types.Part.from_function_response(
+                name=fc.name,
+                response={"result": result},
+            ))
         on_token("\n")
-        messages.append({"role": "user", "content": results})
+        contents.append(types.Content(role="user", parts=result_parts))
 
 
 def main():
     ap = argparse.ArgumentParser(description="Symbiote — Twitch VOD chat agent (Parasite toolkit)")
-    ap.add_argument("--opus", action="store_true", help="Use Claude Opus 4.7 (stronger, pricier)")
+    ap.add_argument("--pro", action="store_true",
+                    help="Use Gemini 2.5 Pro (stronger; smaller free quota)")
+    ap.add_argument("--model", help="Override Gemini model name")
     args = ap.parse_args()
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Symbiote needs ANTHROPIC_API_KEY in your environment.")
-        print("Get one at https://console.anthropic.com, then:")
-        print("  PowerShell:  $env:ANTHROPIC_API_KEY = 'sk-ant-...'")
-        print("  bash:        export ANTHROPIC_API_KEY='sk-ant-...'")
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not api_key:
+        print("Symbiote needs GEMINI_API_KEY (or GOOGLE_API_KEY) in your environment.")
+        print("Get a free key at https://aistudio.google.com/app/apikey, then:")
+        print("  PowerShell:  setx GEMINI_API_KEY \"AIza...\"  (close+reopen terminal)")
+        print("  bash:        export GEMINI_API_KEY='AIza...'")
         sys.exit(1)
 
-    model = "claude-opus-4-7" if args.opus else "claude-sonnet-4-6"
-    client = anthropic.Anthropic()
-    messages = []
+    model = args.model or ("gemini-2.5-pro" if args.pro else "gemini-2.5-flash")
+    client = genai.Client(api_key=api_key)
+    contents = []
 
     print(f"~~ Symbiote bonded. model={model} ~~")
     print("drop a VOD link, ask about one I already have, or 'exit' to leave.\n")
@@ -597,13 +638,14 @@ def main():
             print("bye.")
             return
 
-        messages.append({"role": "user", "content": user_input})
+        contents.append(types.Content(role="user",
+                                       parts=[types.Part(text=user_input)]))
         print("symbiote> ", end="", flush=True)
         try:
-            chat_turn(client, model, messages,
+            chat_turn(client, model, contents,
                       on_token=lambda t: print(t, end="", flush=True))
-        except anthropic.APIError as e:
-            print(f"\n[API error: {e}]")
+        except Exception as e:
+            print(f"\n[API error: {type(e).__name__}: {e}]")
         except KeyboardInterrupt:
             print("\n[interrupted]")
         print()
