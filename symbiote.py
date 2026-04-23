@@ -40,6 +40,83 @@ for _stream in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
+
+# ---- Worm spinner -------------------------------------------------------
+# A tiny ANSI-drawn parasite that wiggles while the agent blocks on network
+# or runs a tool. Auto-disables when stdout isn't a TTY (piped input, logs).
+
+import threading as _threading
+
+
+class WormSpinner:
+    """Threaded, in-place ANSI worm. Safe to start/stop repeatedly."""
+
+    # Purple body (35), bright red head (91). Body chars cycle to fake wiggle.
+    BODY_FRAMES = [
+        "~∿⁓∿~⁓",
+        "⁓~∿⁓∿~",
+        "~⁓~∿⁓∿",
+        "∿~⁓~∿⁓",
+        "⁓∿~⁓~∿",
+        "∿⁓∿~⁓~",
+    ]
+    BODY = "\033[38;5;171m"   # lavender
+    HEAD = "\033[38;5;203m"   # coral red
+    DIM = "\033[38;5;245m"    # gray label
+    RESET = "\033[0m"
+    CLEAR_LINE = "\r\033[K"
+
+    def __init__(self, stream=None):
+        self.stream = stream or sys.stdout
+        self.enabled = getattr(self.stream, "isatty", lambda: False)()
+        self._running = False
+        self._thread = None
+        self._label = ""
+
+    def start(self, label=""):
+        if not self.enabled or self._running:
+            return
+        self._label = label
+        self._running = True
+        self._thread = _threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        if not self._running:
+            return
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        self._thread = None
+        try:
+            self.stream.write(self.CLEAR_LINE)
+            self.stream.flush()
+        except Exception:
+            pass
+
+    def update_label(self, label):
+        self._label = label
+
+    def _run(self):
+        tick = 0
+        while self._running:
+            frame = self.BODY_FRAMES[tick % len(self.BODY_FRAMES)]
+            label = f" {self.DIM}{self._label}{self.RESET}" if self._label else ""
+            line = (f"{self.CLEAR_LINE}  {self.BODY}{frame}"
+                    f"{self.HEAD}◉{self.RESET}{label}")
+            try:
+                self.stream.write(line)
+                self.stream.flush()
+            except Exception:
+                return
+            time.sleep(0.09)
+            tick += 1
+        try:
+            self.stream.write(self.CLEAR_LINE)
+            self.stream.flush()
+        except Exception:
+            pass
+
 from fetch_chat import (
     CLIENT_ID,
     fetch_page,
@@ -586,18 +663,33 @@ def _open_stream(client, model, contents, config, on_token):
     raise RuntimeError("Exhausted retries on rate-limit")
 
 
-def chat_turn(client, model, contents, on_token):
-    """Stream one turn against Gemini, execute any function calls, loop until done."""
+def chat_turn(client, model, contents, on_token, spinner=None):
+    """Stream one turn against Gemini, execute any function calls, loop until done.
+
+    If `spinner` is provided, it's started while waiting for the first token of
+    each stream and while a tool is executing, and stopped as soon as output
+    begins flowing.
+    """
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         tools=_gemini_tools(),
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
 
+    def _spin_start(label):
+        if spinner is not None:
+            spinner.start(label)
+
+    def _spin_stop():
+        if spinner is not None:
+            spinner.stop()
+
     while True:
         text_agg = ""
         fn_calls = []
+        _spin_start("thinking…")
         stream = _open_stream(client, model, contents, config, on_token)
+        first_token = True
         for chunk in stream:
             cand_list = getattr(chunk, "candidates", None) or []
             for cand in cand_list:
@@ -605,11 +697,15 @@ def chat_turn(client, model, contents, on_token):
                 for part in parts:
                     txt = getattr(part, "text", None)
                     if txt:
+                        if first_token:
+                            _spin_stop()
+                            first_token = False
                         on_token(txt)
                         text_agg += txt
                     fc = getattr(part, "function_call", None)
                     if fc and getattr(fc, "name", None):
                         fn_calls.append(fc)
+        _spin_stop()
 
         # Model's turn goes into history.
         model_parts = []
@@ -628,8 +724,10 @@ def chat_turn(client, model, contents, on_token):
         for fc in fn_calls:
             args = _to_jsonable(getattr(fc, "args", {}) or {})
             preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:2])
-            on_token(f"\n  · {fc.name}({preview}) …")
+            on_token(f"\n  · {fc.name}({preview})")
+            _spin_start(f"{fc.name}…")
             result = run_tool(fc.name, args)
+            _spin_stop()
             result_parts.append(types.Part.from_function_response(
                 name=fc.name,
                 response={"result": result},
@@ -656,6 +754,7 @@ def main():
     model = args.model or ("gemini-2.5-pro" if args.pro else "gemini-2.5-flash")
     client = genai.Client(api_key=api_key)
     contents = []
+    spinner = WormSpinner()
 
     print(f"~~ Symbiote bonded. model={model} ~~")
     print("drop a VOD link, ask about one I already have, or 'exit' to leave.\n")
@@ -677,7 +776,8 @@ def main():
         print("symbiote> ", end="", flush=True)
         try:
             chat_turn(client, model, contents,
-                      on_token=lambda t: print(t, end="", flush=True))
+                      on_token=lambda t: print(t, end="", flush=True),
+                      spinner=spinner)
         except Exception as e:
             print(f"\n[API error: {type(e).__name__}: {e}]")
         except KeyboardInterrupt:

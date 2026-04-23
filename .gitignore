@@ -5,3 +5,8 @@ venv/
 .env
 .DS_Store
 .claude/
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
