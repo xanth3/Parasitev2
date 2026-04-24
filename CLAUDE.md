@@ -9,12 +9,13 @@ stream without watching it.
 
 ## Scripts
 
-Three standalone scripts plus one agent entrypoint. No package.
+Four standalone scripts plus one agent entrypoint. No package.
 
 - [fetch_chat.py](fetch_chat.py) — pulls the full chat from a VOD URL/ID via Twitch's public GraphQL API and writes a TwitchDownloader-compatible `chat_<id>.json`.
 - [heatmap.py](heatmap.py) — consumes that JSON, emits a PNG histogram, a top-N terminal table, and `peaks.csv`.
 - [peaks_detail.py](peaks_detail.py) — expands each peak into a Markdown report with top tokens and sampled messages.
-- [symbiote.py](symbiote.py) — the Symbiote agent. REPL + Gemini function-calling loop. Imports from the three scripts above.
+- [viral_score.py](viral_score.py) — **Siphon virality engine.** Consumes `chat.json` + `peaks.csv`, scores each peak on a 0–100 Virality Index, computes smart-padded cut windows, and writes `viral_score.csv` + `siphon_report.md`. See *Siphon virality engine* section below.
+- [symbiote.py](symbiote.py) — the Symbiote agent. REPL + Gemini function-calling loop. Imports from the four scripts above. Also has a **Manual Mode** fallback — see below.
 - [requirements.txt](requirements.txt) — `matplotlib`, `requests`, `google-genai`. Everything else is stdlib.
 
 ## Why fetch_chat.py exists
@@ -64,11 +65,14 @@ pip install -r requirements.txt
 setx GEMINI_API_KEY "AIza..."           # PowerShell, close + reopen terminal
 python symbiote.py
 python symbiote.py --pro                # Gemini 2.5 Pro for deeper analysis
+python symbiote.py --manual             # Manual mode — no AI required
 
 # Raw scripts (fallback / CI / power-user path)
 python fetch_chat.py https://www.twitch.tv/videos/<id> --max-seconds 23766
 python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 15
 python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
+python viral_score.py archive/<dir>/chat.json --peaks archive/<dir>/peaks.csv \
+    --info archive/<dir>/info.json
 ```
 
 **Why Gemini:** the project ships to users, and Gemini 2.5 Flash has a free tier — no payment method required. Anthropic's API is pay-as-you-go.
@@ -87,9 +91,14 @@ archive/
     chat.json          # full chat history (TwitchDownloader-compatible)
     info.json          # yt-dlp metadata
     heatmap.png        # density histogram
-    peaks.csv          # top-N peaks
+    peaks.csv          # top-N peaks (raw density)
     peaks_detail.md    # per-peak tokens + samples
+    viral_score.csv    # Siphon scored + padded clips with reasoning column
+    siphon_report.md   # per-clip pillar breakdown + mood tokens + sample messages
     meta.json          # {vod_id, streamer, upload_date, fetched_at, duration, message_count, pages}
+
+~/Desktop/VODs/        # VOD video files (configurable via VODS_DIR env var)
+  <streamer>_<date>_v<vod_id>.<ext>
 ```
 
 Directory date is the **VOD's upload date** (from yt-dlp `info.json.upload_date`), not the fetch date — sorting by filename gives stream chronology. If `info.json` can't be pulled, falls back to today's UTC date.
@@ -98,13 +107,14 @@ Path helpers in [symbiote.py](symbiote.py) (`chat_path`, `info_path`, `heatmap_p
 
 ## Symbiote agent tools
 
-Six tools exposed to Gemini via function-declarations in `symbiote.py`:
+Seven tools exposed to Gemini via function-declarations in `symbiote.py`:
 
 | Tool | Purpose |
 | --- | --- |
-| `fetch_vod` | Download chat + yt-dlp info, archive into dated folder, write `meta.json`. Cache-hits if already archived. |
+| `fetch_vod` | Download chat + yt-dlp info + VOD video, archive into dated folder, write `meta.json`. `download_video=false` for chat-only. |
 | `list_vods` | Walk `archive/` and return all known VODs with metadata. Also picks up legacy flat-layout chats. |
-| `get_peaks` | Bin chat into buckets, return top-N peaks with HH:MM:SS + chapter label. |
+| `get_peaks` | Bin chat into buckets, return top-N peaks with HH:MM:SS + chapter label. Raw density only — no scoring. |
+| `get_virality` | **Siphon engine.** Score peaks 0–100, smart-pad cut windows, classify mood, return reasoning. Use this for clip decisions. Writes `viral_score.csv` + `siphon_report.md`. |
 | `analyze_window` | Given a timestamp + duration, return top tokens and sampled messages. Accepts `H:MM:SS`, `H:MM`, or raw seconds. |
 | `search_chat` | Regex-search the chat. Returns total matches + density peaks. |
 | `open_heatmap` | `os.startfile` the VOD's heatmap.png (regenerates via `heatmap.py` if missing). |
@@ -119,7 +129,73 @@ System prompt in `SYSTEM_PROMPT`. Tool schemas in `TOOLS` (JSON Schema; `paramet
 - Disable auto function calling (`AutomaticFunctionCallingConfig(disable=True)`) because we manage the loop manually.
 - Rate-limit retries are wrapped in `_open_stream` — it catches the 429, reads the `retryDelay` from the error body, sleeps, and retries. Don't call `generate_content_stream` directly from `chat_turn` or you lose this.
 
-**Windows console gotcha:** Gemini's prose uses `→`, `×`, em-dashes, and emotes that crash `cp1252` stdout. Top of `symbiote.py` reconfigures `sys.stdout` / `sys.stderr` to `utf-8` with `errors="replace"` so a rogue glyph never kills a session. Leave this in even if the module looks cross-platform clean — without it, Windows Terminal users hit `UnicodeEncodeError` on the first `→`.
+**Windows console gotcha:** Gemini's prose uses `→`, `×`, em-dashes, and emotes that crash `cp1252` stdout. Top of `symbiote.py` and `viral_score.py` reconfigure `sys.stdout` / `sys.stderr` to `utf-8` with `errors="replace"` so a rogue glyph never kills a session. Leave this in even if the module looks cross-platform clean — without it, Windows Terminal users hit `UnicodeEncodeError` on the first `→`.
+
+## Siphon virality engine (`viral_score.py`)
+
+Turns a `peaks.csv` + `chat.json` into a ranked, padded, reasoning-annotated clip list.
+
+**Algorithm — Virality Index 0–100:**
+
+| Pillar | Weight | Formula |
+| --- | --- | --- |
+| Velocity | 37.5% | `100 × log₂(spike_mult) / log₂(20)` — 2× → 23, 10× → 77, 20× → 100 |
+| Mood | 37.5% | Dominant emote category (HYPE/FUNNY/SHOCK/DRAMA) × confidence shrinkage |
+| Echo | 25% | `min(100, 150 × mean(m+1, m+2) / peak_count)` — Story/Lingering/Jump Scare |
+| Magnitude | ×scaler | `(0.5 + 0.5 × peak/p99)` — halves sub-median peaks, leaves p99 untouched |
+
+Baseline guard: `max(mean(m-5..m-1), 0.3 × global_median)`. First 5 minutes skipped (noisy pre-stream).
+
+**Smart Padding:** 1-second resolution walk around each peak. Start = 5s before velocity ramp-up (where chat goes quiet for 5 consecutive seconds walking backwards). End = where the echo falls silent for 10 consecutive seconds walking forward. Duration clamped 30–180s. Adjacent windows within 15s are merged into one clip (max 300s).
+
+**Mood lexicon** (`MOOD_LEXICON` in `viral_score.py`): whitespace-split uppercase matching — captures short tokens (`W`, `L`, `+2`) that the `tokens_in` regex would miss.
+
+**Outputs:** `viral_score.csv` (reasoning column per clip) + `siphon_report.md` (pillar breakdown + mood tokens + sample messages per clip). Both land in the VOD's archive directory.
+
+**Public API for `symbiote.py`:**
+- `score_from_paths(chat_path, peaks_path, info_path=None) → list[dict]`
+- `write_csv(scored, out_path)` / `write_md(scored, comments, out_path, chat_name)`
+
+## Manual Mode
+
+When Gemini is unavailable (no API key, quota exhausted, offline), Symbiote falls back to a direct tool REPL — no AI in the loop.
+
+**Triggers:**
+- `python symbiote.py --manual` — explicit flag
+- `GEMINI_API_KEY` missing → auto-enter on startup
+- `DailyQuotaExhausted` mid-session → prompt to switch
+
+**Commands in manual mode:**
+```
+fetch <url|id> [no-video]   — download chat (+ video unless 'no-video')
+list                         — show archived VODs
+peaks <id> [top=15]          — raw peak density table
+score <id> [top=15]          — Siphon virality scoring
+window <id> <start> [dur=60] — analyze a timestamp window
+search <id> <pattern>        — regex search chat
+heatmap <id>                 — open heatmap PNG
+help  |  quit
+```
+
+## VOD Video Files
+
+`fetch_vod` (tool) and `fetch` (manual mode command) both download the VOD video via yt-dlp in addition to chat.
+
+**Destination — resolved in order:**
+1. `VODS_DIR` environment variable if set
+2. `~/Desktop/VODs` (resolves to `C:\Users\DARKLXRD\Desktop\VODs` on Windows)
+
+Directory is created automatically. Filename template: `<streamer>_<upload_date>_v<vod_id>.<ext>`.
+
+To skip video download: pass `download_video=false` to the `fetch_vod` Gemini tool, or append `no-video` in manual mode (`fetch <url> no-video`).
+
+Override destination:
+```
+# PowerShell
+setx VODS_DIR "D:\Stream\VODs"
+# bash
+export VODS_DIR=/mnt/storage/vods
+```
 
 ## Conventions
 

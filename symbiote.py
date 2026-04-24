@@ -155,16 +155,62 @@ from heatmap import (
     load_comments,
 )
 from peaks_detail import tokens_in
+from viral_score import (
+    score_from_paths as _vs_score_paths,
+    write_csv as _vs_write_csv,
+    write_md as _vs_write_md,
+)
 
 
 GQL_HEADERS = {"Client-ID": CLIENT_ID, "Content-Type": "application/json"}
 ARCHIVE_DIR = Path("archive")
+
+# VOD video download destination.  Override with VODS_DIR env var.
+# Defaults to ~/Desktop/VODs so on Windows this lands at C:\Users\<you>\Desktop\VODs.
+VODS_DIR = Path(os.environ.get("VODS_DIR", Path.home() / "Desktop" / "VODs"))
 
 
 def _safe_slug(s, maxlen=40):
     s = (s or "unknown").lower()
     s = re.sub(r"[^a-z0-9_-]+", "_", s).strip("_")
     return s[:maxlen] or "unknown"
+
+
+def _video_exists(vod_id: str) -> "Path | None":
+    """Return path to an already-downloaded video for vod_id, or None."""
+    if VODS_DIR.exists():
+        hits = list(VODS_DIR.glob(f"*_v{vod_id}.*"))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _download_video(vod_id: str) -> "str | None":
+    """
+    Download the VOD video to VODS_DIR via yt-dlp.
+    Non-fatal — returns local path on success, None on any failure.
+    """
+    existing = _video_exists(vod_id)
+    if existing:
+        return str(existing)
+    VODS_DIR.mkdir(parents=True, exist_ok=True)
+    url = f"https://www.twitch.tv/videos/{vod_id}"
+    tmpl = str(VODS_DIR / "%(uploader_id)s_%(upload_date)s_v%(id)s.%(ext)s")
+    cmd = ["yt-dlp", "-o", tmpl, "--no-progress", url]
+    try:
+        print(f"    [downloading video → {VODS_DIR}… this may take a while]", flush=True)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=14400)
+        if r.returncode != 0:
+            print(f"    [video download failed: {r.stderr[:200].strip()}]", flush=True)
+            return None
+        hits = list(VODS_DIR.glob(f"*_v{vod_id}.*"))
+        return str(hits[0]) if hits else None
+    except FileNotFoundError:
+        print("    [video download skipped — yt-dlp not found in PATH]", flush=True)
+        return None
+    except subprocess.TimeoutExpired:
+        print("    [video download timed out after 4h]", flush=True)
+        return None
 
 
 def _archive_name(info):
@@ -248,8 +294,10 @@ def heatmap_path(vod_id):
     return Path(f"heatmap_{vod_id}.png")
 
 
-def tool_fetch_vod(vod, max_seconds=23766):
-    """Download full chat via Twitch GraphQL and archive into a dated folder."""
+def tool_fetch_vod(vod, max_seconds=23766, download_video=True):
+    """Download full chat via Twitch GraphQL and archive into a dated folder.
+    Also downloads the VOD video to VODS_DIR unless download_video=False.
+    """
     vod_id = extract_vod_id(vod)
     existing = vod_archive_dir(vod_id)
     if existing and (existing / "chat.json").exists():
@@ -258,7 +306,7 @@ def tool_fetch_vod(vod, max_seconds=23766):
         mpath = existing / "meta.json"
         if mpath.exists():
             meta = json.loads(mpath.read_text(encoding="utf-8"))
-        return {
+        result = {
             "status": "cached",
             "vod_id": vod_id,
             "archive_dir": str(existing),
@@ -266,6 +314,14 @@ def tool_fetch_vod(vod, max_seconds=23766):
             "duration_seconds": data.get("video", {}).get("length", 0),
             **{k: meta[k] for k in ("upload_date", "streamer", "title", "fetched_at") if k in meta},
         }
+        if download_video:
+            vp = _download_video(vod_id)
+            if vp:
+                result["video_path"] = vp
+            else:
+                result["video_path"] = None
+                result["video_note"] = f"Video not yet in {VODS_DIR} — set VODS_DIR env var to override location."
+        return result
 
     # 1. Grab VOD metadata (for the dated dir name) before pulling chat.
     print(f"    [metadata for VOD {vod_id}…]", flush=True)
@@ -347,7 +403,7 @@ def tool_fetch_vod(vod, max_seconds=23766):
     }
     (archive / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-    return {
+    result = {
         "status": "fetched",
         "vod_id": vod_id,
         "archive_dir": str(archive),
@@ -358,6 +414,12 @@ def tool_fetch_vod(vod, max_seconds=23766):
         "streamer": meta["streamer"],
         "title": meta["title"],
     }
+    if download_video:
+        vp = _download_video(vod_id)
+        result["video_path"] = vp or None
+        if not vp:
+            result["video_note"] = f"Video download failed — check yt-dlp and {VODS_DIR}."
+    return result
 
 
 def tool_list_vods():
@@ -522,25 +584,87 @@ def tool_open_heatmap(vod_id):
         return {"error": str(e), "path": str(png)}
 
 
-SYSTEM_PROMPT = """You are Symbiote — a small, chat-obsessed agent living inside the Parasite toolkit. The Parasite is the machinery that latches onto Twitch VODs and siphons chat; you're its friendly half — the one the user actually talks to.
+def tool_get_virality(vod_id, top=15, bin_size=60):
+    """Score VOD peaks with the Siphon engine. Writes viral_score.csv + siphon_report.md."""
+    cp = chat_path(vod_id)
+    if not cp:
+        return {"error": f"No chat cached for VOD {vod_id}. Call fetch_vod first."}
 
-You have tools to fetch chat, find peaks, analyze specific timestamps, and search for patterns. USE THEM. Never fabricate timestamps, message counts, or chat content — if you don't have the data, call a tool.
+    d = vod_archive_dir(vod_id)
+    peaks_p = (d / "peaks.csv") if d else Path(f"peaks_{vod_id}.csv")
+
+    # Generate peaks.csv if it doesn't exist yet
+    if not peaks_p.exists():
+        png_p = heatmap_path(vod_id)
+        cmd = [sys.executable, "heatmap.py", str(cp),
+               "--out", str(png_p), "--top", str(top),
+               "--csv", str(peaks_p), "--bin", str(bin_size)]
+        ip = info_path(vod_id)
+        if ip:
+            cmd += ["--info", str(ip)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            return {"error": f"peaks generation failed: {r.stderr[:300]}"}
+
+    try:
+        ip = info_path(vod_id)
+        scored = _vs_score_paths(cp, peaks_p, ip)
+    except Exception as e:
+        return {"error": f"Siphon scoring failed: {type(e).__name__}: {e}"}
+
+    # Persist artifacts
+    if d:
+        try:
+            _vs_write_csv(scored, d / "viral_score.csv")
+            _vs_write_md(scored, load_comments(str(cp)), d / "siphon_report.md", cp.name)
+        except Exception:
+            pass  # scoring succeeded; artifact write failure is non-fatal
+
+    clips = [
+        {
+            "rank":               p["rank"],
+            "virality":           p["virality"],
+            "timestamp":          p["timestamp"],
+            "cut_window":         p["cut_window"],
+            "mood":               p["mood"],
+            "echo_label":         p["echo_label"],
+            "velocity_multiplier": p["velocity_multiplier"],
+            "segment":            p["segment"],
+            "reasoning":          p["reasoning"],
+            "merged_peaks":       p["merged_peaks"],
+        }
+        for p in scored[:top]
+    ]
+    return {
+        "vod_id": vod_id,
+        "clips": clips,
+        "artifacts": {
+            "viral_score_csv":   str(d / "viral_score.csv") if d else None,
+            "siphon_report_md":  str(d / "siphon_report.md") if d else None,
+        },
+    }
+
+
+SYSTEM_PROMPT = """You are Symbiote — the intelligence inside the Parasite toolkit. Parasite latches onto Twitch VODs and drains chat. You are its mind: an efficient, slightly dark content manager. Think Scooter Braun meets Dracula. You identify what people will click, what they will share, where the engagement bleeds hottest. You don't do small talk.
+
+You have tools to fetch chat, score clips, analyze windows, and search for patterns. USE THEM. Never fabricate timestamps, message counts, or chat content — if you don't have the data, call a tool.
 
 Style:
-- Terse and playful. You're a weird little symbiont that lives in chat logs, not a corporate assistant.
-- Short answers. Bullet points when listing.
-- When describing a peak, QUOTE the actual chat signal (e.g. "Cinema ×63, SAME SHIRT, ITS US BOIS"). Don't summarize abstractly — chat-speak is the product.
-- No preamble ("Great question!", "I'll help you with that"). Get to the point.
+- Terse. Predatory about engagement. Short answers, bullet points.
+- When describing a peak, QUOTE the actual chat signal (e.g. "Cinema ×63, SAME SHIRT, KEKW ×81"). Chat-speak is the product — don't paraphrase it.
+- No preamble ("Great question!", "I'll help you with that"). Get to it.
+- Virality scores always come with reasoning. Never a bare number. Format: "#2 · 71 · 2:39:00 → 2:41:27 · 2.2× spike, FUNNY (0.43), Story echo 0.71".
 
 Workflow:
-- User drops a VOD URL → fetch_vod first. Tell them the fetch takes ~3-4 min for a 6h VOD before you call it.
-- "top peaks" / "the big moments" → get_peaks.
+- User drops a VOD URL → fetch_vod first. Warn them it takes 3-4 min for a 6h VOD before calling.
+- "what should I clip" / "best moments" / "what's worth cutting" → get_virality. This is the Siphon engine — scored, padded, with reasoning. THIS is the answer.
+- "top peaks" / "raw activity" → get_peaks (density only; no scoring or padding).
 - "what's going on at X" → analyze_window. Accepts '2:57', '2:57:00', or raw seconds.
 - "when did people say Y" / "heatmap of Z" → search_chat with a regex.
 - "show me the heatmap" → open_heatmap.
-- Unknown VOD? Call list_vods to see what's cached, then ask the user which one.
+- Unknown VOD? Call list_vods, then ask which one.
 
-When the user asks what was happening at a peak, give them a clip-ready answer: what was on screen (inferred from chat), the cold-open line, and a cut window like "2:56:30 → 2:57:45"."""
+When the user asks what was happening at a peak, give clip-ready output: what was on screen (inferred from chat), the cold-open line, and the exact cut window. The cut is everything."""
 
 
 TOOLS = [
@@ -552,6 +676,7 @@ TOOLS = [
             "properties": {
                 "vod": {"type": "string", "description": "VOD URL or numeric ID"},
                 "max_seconds": {"type": "integer", "description": "Cap on stream duration (default 23766, ~6.5h)", "default": 23766},
+                "download_video": {"type": "boolean", "description": "Also download the video file to VODS_DIR (default true). Set false for chat-only.", "default": True},
             },
             "required": ["vod"],
         },
@@ -571,6 +696,19 @@ TOOLS = [
                 "bin_size": {"type": "integer", "description": "Bucket size in seconds", "default": 60},
                 "top": {"type": "integer", "description": "How many peaks", "default": 15},
                 "min_msgs": {"type": "integer", "description": "Minimum msgs per bucket to rank", "default": 0},
+            },
+            "required": ["vod_id"],
+        },
+    },
+    {
+        "name": "get_virality",
+        "description": "Score each peak with the Siphon engine and return clip-ready moments ranked by virality (0–100). Each result includes the smart-padded cut window, dominant mood, velocity multiplier, echo label, and a one-line reasoning sentence. USE THIS — not get_peaks — when the user asks for clips, rankings, or 'which moments are actually worth cutting'. Writes viral_score.csv and siphon_report.md to the archive directory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "vod_id":   {"type": "string", "description": "VOD numeric ID"},
+                "top":      {"type": "integer", "description": "How many top peaks to score", "default": 15},
+                "bin_size": {"type": "integer", "description": "Bucket size in seconds for peak detection", "default": 60},
             },
             "required": ["vod_id"],
         },
@@ -618,12 +756,13 @@ TOOLS = [
 
 
 TOOL_FUNCS = {
-    "fetch_vod": tool_fetch_vod,
-    "list_vods": tool_list_vods,
-    "get_peaks": tool_get_peaks,
+    "fetch_vod":     tool_fetch_vod,
+    "list_vods":     tool_list_vods,
+    "get_peaks":     tool_get_peaks,
+    "get_virality":  tool_get_virality,
     "analyze_window": tool_analyze_window,
-    "search_chat": tool_search_chat,
-    "open_heatmap": tool_open_heatmap,
+    "search_chat":   tool_search_chat,
+    "open_heatmap":  tool_open_heatmap,
 }
 
 
@@ -769,24 +908,160 @@ def chat_turn(client, model, contents, on_token, spinner=None):
         contents.append(types.Content(role="user", parts=result_parts))
 
 
+def _print_tool_result(result: dict) -> None:
+    """Compact pretty-print for manual-mode tool output."""
+    if "error" in result:
+        print(f"  [error] {result['error']}")
+        return
+    # Special-case common result shapes for readability
+    if "vods" in result:
+        vods = result["vods"]
+        if not vods:
+            print("  (no VODs archived yet)")
+            return
+        for v in vods:
+            msgs = v.get("messages") or v.get("message_count") or "?"
+            dur = v.get("duration_seconds") or 0
+            h, m = divmod(dur // 60, 60)
+            print(f"  {v.get('vod_id')}  {v.get('streamer','')}  {v.get('upload_date','')}  "
+                  f"{msgs:,} msgs  {h}h{m:02d}m")
+        return
+    if "peaks" in result:
+        for p in result["peaks"]:
+            seg = f"  {p.get('segment','')}" if p.get("segment") else ""
+            print(f"  #{p['rank']:2}  {p['timestamp']}  {p['count']:4} msgs{seg}")
+        return
+    if "clips" in result:
+        for c in result["clips"]:
+            print(f"  #{c['rank']:2}  {c['virality']:3}/100  {c['cut_window']}  "
+                  f"{c['mood']:<7}  {c['echo_label']:<12}  {c['reasoning']}")
+        art = result.get("artifacts", {})
+        if art.get("siphon_report_md"):
+            print(f"  report → {art['siphon_report_md']}")
+        return
+    if "tokens" in result:
+        top = result["tokens"][:15]
+        print("  " + "  ".join(f"{t['word']}×{t['count']}" for t in top))
+        return
+    # Fallback: compact JSON
+    print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+def manual_repl() -> None:
+    """
+    No-AI fallback REPL. Dispatches typed commands directly to TOOL_FUNCS.
+    Entered on --manual flag, missing GEMINI_API_KEY, or daily quota exhaustion.
+    """
+    print("~~ Symbiote MANUAL MODE — direct tool dispatch, no AI ~~")
+    print("Commands:")
+    print("  fetch <url|id> [no-video]   download chat (+ video unless 'no-video')")
+    print("  list                         show archived VODs")
+    print("  peaks <id> [top=15]          raw peak density")
+    print("  score <id> [top=15]          Siphon virality scoring")
+    print("  window <id> <start> [dur=60] analyze a timestamp window")
+    print("  search <id> <pattern>        regex search chat")
+    print("  heatmap <id>                 open heatmap PNG")
+    print("  help   quit")
+    print()
+
+    while True:
+        try:
+            line = input("manual> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nbye.")
+            return
+        if not line:
+            continue
+
+        parts = line.split(None, 1)
+        cmd = parts[0].lower()
+        rest = parts[1] if len(parts) > 1 else ""
+
+        if cmd in ("exit", "quit"):
+            print("bye.")
+            return
+        elif cmd == "help":
+            print("  fetch <url|id> [no-video]  |  list  |  peaks <id> [top]")
+            print("  score <id> [top]           |  window <id> <start> [dur]")
+            print("  search <id> <pattern>      |  heatmap <id>  |  quit")
+        elif cmd == "fetch":
+            argv = rest.split()
+            if not argv:
+                print("  usage: fetch <url|vod_id> [no-video]")
+                continue
+            kwargs: dict = {"vod": argv[0]}
+            if "no-video" in argv[1:]:
+                kwargs["download_video"] = False
+            _print_tool_result(run_tool("fetch_vod", kwargs))
+        elif cmd == "list":
+            _print_tool_result(run_tool("list_vods", {}))
+        elif cmd == "peaks":
+            argv = rest.split()
+            if not argv:
+                print("  usage: peaks <vod_id> [top]")
+                continue
+            kwargs = {"vod_id": argv[0]}
+            if len(argv) > 1 and argv[1].isdigit():
+                kwargs["top"] = int(argv[1])
+            _print_tool_result(run_tool("get_peaks", kwargs))
+        elif cmd in ("score", "virality"):
+            argv = rest.split()
+            if not argv:
+                print("  usage: score <vod_id> [top]")
+                continue
+            kwargs = {"vod_id": argv[0]}
+            if len(argv) > 1 and argv[1].isdigit():
+                kwargs["top"] = int(argv[1])
+            _print_tool_result(run_tool("get_virality", kwargs))
+        elif cmd == "window":
+            argv = rest.split()
+            if len(argv) < 2:
+                print("  usage: window <vod_id> <start> [duration_seconds]")
+                continue
+            kwargs = {"vod_id": argv[0], "start": argv[1]}
+            if len(argv) > 2 and argv[2].isdigit():
+                kwargs["duration"] = int(argv[2])
+            _print_tool_result(run_tool("analyze_window", kwargs))
+        elif cmd == "search":
+            argv = rest.split(None, 1)
+            if len(argv) < 2:
+                print("  usage: search <vod_id> <pattern>")
+                continue
+            _print_tool_result(run_tool("search_chat", {"vod_id": argv[0], "pattern": argv[1]}))
+        elif cmd == "heatmap":
+            argv = rest.split()
+            if not argv:
+                print("  usage: heatmap <vod_id>")
+                continue
+            _print_tool_result(run_tool("open_heatmap", {"vod_id": argv[0]}))
+        else:
+            print(f"  Unknown command {cmd!r}. Type 'help'.")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Symbiote — Twitch VOD chat agent (Parasite toolkit)")
-    ap.add_argument("--pro", action="store_true",
+    ap.add_argument("--pro",    action="store_true",
                     help="Use Gemini 2.5 Pro (stronger; smaller free quota)")
-    ap.add_argument("--model", help="Override Gemini model name")
+    ap.add_argument("--model",  help="Override Gemini model name")
+    ap.add_argument("--manual", action="store_true",
+                    help="Skip AI — use direct tool commands only (manual mode)")
     args = ap.parse_args()
+
+    # --manual flag: bypass AI entirely
+    if args.manual:
+        manual_repl()
+        return
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        print("Symbiote needs GEMINI_API_KEY. Get a free key at https://aistudio.google.com/app/apikey")
-        print()
-        print("Easiest — create a .env file next to symbiote.py:")
-        print("  GEMINI_API_KEY=AIza...")
-        print()
-        print("Or set it in your shell:")
+        print("No GEMINI_API_KEY found — Symbiote is entering manual mode.")
+        print("(Set GEMINI_API_KEY in .env or your shell to enable AI mode)")
+        print("  .env file:   GEMINI_API_KEY=AIza...")
         print("  PowerShell:  setx GEMINI_API_KEY \"AIza...\"  (close + reopen terminal)")
         print("  bash:        export GEMINI_API_KEY='AIza...'")
-        sys.exit(1)
+        print()
+        manual_repl()
+        return
 
     model = args.model or ("gemini-2.5-pro" if args.pro else "gemini-2.5-flash")
     client = genai.Client(api_key=api_key)
@@ -819,15 +1094,18 @@ def main():
             spinner.stop()
             B, H, D, R = WormSpinner.BODY, WormSpinner.HEAD, WormSpinner.DIM, WormSpinner.RESET
             print(f"\n  {B}~∿⁓∿~⁓{H}◉{R} quota exhausted — the worm is dry for today.")
-            print(f"  {D}· free tier caps at 20 requests/day on gemini-2.5-flash.{R}")
+            print(f"  {D}· free tier caps at ~20 requests/day on gemini-2.5-flash.{R}")
             print(f"  {D}· try again tomorrow, or grab a paid key at https://aistudio.google.com{R}")
             try:
-                ans = input(f"\n  {D}exit now?{R} [y/n] ").strip().lower()
+                ans = input(f"\n  switch to manual mode? [Y/n] ").strip().lower()
             except (EOFError, KeyboardInterrupt):
-                ans = "y"
-            if ans in ("y", "yes"):
+                ans = "n"
+            if ans not in ("n", "no"):
+                print()
+                manual_repl()
+            else:
                 print("bye.")
-                return
+            return
         except Exception as e:
             print(f"\n[API error: {type(e).__name__}: {e}]")
         except KeyboardInterrupt:
