@@ -1158,14 +1158,13 @@ def build_effects_metadata(args, plan: dict, video_exists: bool) -> dict:
         "shock_cam_full_scale": float(getattr(args, "shock_cam_full_scale", 2.15)),
         "shock_cam_full_face_coverage": float(getattr(args, "shock_cam_full_face_coverage", 0.82)),
         "shock_cam_medium_face_coverage": float(getattr(args, "shock_cam_medium_face_coverage", 0.62)),
-        "shock_cam_reason": "dominant mood was SHOCK" if shock_requested else "",
+        "shock_cam_variant": str((plan or {}).get("shock_cam_variant") or ""),
+        "shock_cam_reason": "focused around the refined peak moment" if shock_requested else "",
         "face_count": 0,
         "face_detected": False,
         "selected_face": None,
         "target_region": None,
         "crop": None,
-        "crop_full": None,
-        "crop_medium": None,
         "intro_zoom_skipped_reason": "shock_cam active" if args.intro_zoom and shock_requested else "",
         "video_probe_skipped": not video_exists,
         "chat_overlay": bool(getattr(args, "chat_overlay", False)),
@@ -1200,9 +1199,7 @@ def build_polish_filter(args, clip_duration: float, width: int, height: int, eff
         shock_end = min(clip_duration, shock_start + float(args.shock_cam_duration))
         if shock_end <= shock_start:
             shock_start, shock_end = 0.0, min(clip_duration, float(args.shock_cam_duration))
-        crop_full = effects.get("crop_full") or effects["crop"]
-        crop_medium = effects.get("crop_medium") or effects["crop"]
-        split_at = min(shock_end, shock_start + max(0.25, (shock_end - shock_start) * 0.45))
+        crop = effects["crop"]
         specs = []
         labels = []
         idx = 0
@@ -1211,18 +1208,11 @@ def build_polish_filter(args, clip_duration: float, width: int, height: int, eff
             labels.append(f"[v{idx}]")
             idx += 1
         specs.append(
-            f"[0:v]trim=start={shock_start:.3f}:end={split_at:.3f},setpts=PTS-STARTPTS,"
-            f"crop={crop_full['w']}:{crop_full['h']}:{crop_full['x']}:{crop_full['y']},scale={width}:{height},setsar=1[v{idx}]"
+            f"[0:v]trim=start={shock_start:.3f}:end={shock_end:.3f},setpts=PTS-STARTPTS,"
+            f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']},scale={width}:{height},setsar=1[v{idx}]"
         )
         labels.append(f"[v{idx}]")
         idx += 1
-        if shock_end - split_at > 0.01:
-            specs.append(
-                f"[0:v]trim=start={split_at:.3f}:end={shock_end:.3f},setpts=PTS-STARTPTS,"
-                f"crop={crop_medium['w']}:{crop_medium['h']}:{crop_medium['x']}:{crop_medium['y']},scale={width}:{height},setsar=1[v{idx}]"
-            )
-            labels.append(f"[v{idx}]")
-            idx += 1
         if shock_end < clip_duration - 0.01:
             specs.append(f"[0:v]trim=start={shock_end:.3f}:end={clip_duration:.3f},setpts=PTS-STARTPTS[v{idx}]")
             labels.append(f"[v{idx}]")
@@ -1302,29 +1292,38 @@ def prepare_effects(args, plan: dict, tmp_dir: Path | None = None) -> dict:
         effects["target_region"] = target.get("region")
         effects["shock_cam_resolved_target"] = target["resolved"]
         box = target.get("box")
+        variant = str(effects.get("shock_cam_variant") or "full").lower()
         if target.get("kind") == "region" and box:
-            effects["crop"] = compute_center_crop(width, height, box["cx"], box["cy"], float(args.shock_cam_scale))
-            effects["crop_full"] = compute_center_crop(width, height, box["cx"], box["cy"], float(getattr(args, "shock_cam_full_scale", 2.15)))
-            effects["crop_medium"] = effects["crop"]
-        elif target.get("kind") == "center" or not box:
-            effects["crop"] = compute_center_crop(width, height, width / 2, height / 2, float(args.shock_cam_scale))
-            effects["crop_full"] = compute_center_crop(width, height, width / 2, height / 2, float(getattr(args, "shock_cam_full_scale", 2.15)))
-            effects["crop_medium"] = effects["crop"]
-        else:
-            effects["crop"] = compute_punch_crop(width, height, box, float(args.shock_cam_scale))
-            effects["crop_full"] = compute_face_focus_crop(
-                width,
-                height,
-                box,
-                float(getattr(args, "shock_cam_full_face_coverage", 0.82)),
-                float(getattr(args, "shock_cam_full_scale", 2.15)),
+            scale = (
+                float(getattr(args, "shock_cam_full_scale", 2.15))
+                if variant == "full"
+                else float(args.shock_cam_scale)
             )
-            effects["crop_medium"] = compute_face_focus_crop(
+            effects["crop"] = compute_center_crop(width, height, box["cx"], box["cy"], scale)
+        elif target.get("kind") == "center" or not box:
+            scale = (
+                float(getattr(args, "shock_cam_full_scale", 2.15))
+                if variant == "full"
+                else float(args.shock_cam_scale)
+            )
+            effects["crop"] = compute_center_crop(width, height, width / 2, height / 2, scale)
+        else:
+            coverage = (
+                float(getattr(args, "shock_cam_full_face_coverage", 0.82))
+                if variant == "full"
+                else float(getattr(args, "shock_cam_medium_face_coverage", 0.62))
+            )
+            fallback_scale = (
+                float(getattr(args, "shock_cam_full_scale", 2.15))
+                if variant == "full"
+                else float(args.shock_cam_scale)
+            )
+            effects["crop"] = compute_face_focus_crop(
                 width,
                 height,
                 box,
-                float(getattr(args, "shock_cam_medium_face_coverage", 0.62)),
-                float(args.shock_cam_scale),
+                coverage,
+                fallback_scale,
             )
     effects["_peak_rel"] = float(plan["peak_seconds"] - plan["start_seconds"])
     effects["filter_summary"] = ""
@@ -1456,6 +1455,7 @@ def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms
     if not args.dry_run:
         ensure_output_layout(layout, thumbnail=args.thumbnail, subtitles=bool(getattr(args, "speech_subtitles", False)))
     clips = []
+    shock_occurrence = 0
     with tempfile.TemporaryDirectory(prefix="parasite_export_") as td:
         tmp_dir = Path(td)
         for idx, plan in enumerate(plans, 1):
@@ -1496,6 +1496,14 @@ def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms
                         "segment_count": None,
                         "dry_run": True,
                     }
+            if getattr(args, "shock_cam", False) and should_apply_shock_cam(
+                plan["signals"],
+                getattr(args, "shock_cam_min_mood", "SHOCK"),
+                bool(getattr(args, "shock_cam_allow_noise", False)),
+            ):
+                shock_occurrence += 1
+                plan["shock_cam_occurrence"] = shock_occurrence
+                plan["shock_cam_variant"] = "full" if shock_occurrence % 2 == 1 else "three_quarter"
             effects = prepare_effects(args, plan, tmp_dir)
             effects_public = {
                 k: v for k, v in effects.items()
