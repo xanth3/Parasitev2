@@ -651,16 +651,49 @@ def _ass_color_for_user(user: str) -> str:
     return palette[sum(ord(c) for c in user) % len(palette)]
 
 
-def write_chat_overlay_ass(comments: list[dict], start: int, end: int, out_path: Path, args) -> None:
-    """
-    Transparent chatlog-style overlay above the camera area.
-    Coordinates target 1920x1080 source: left column above the webcam.
-    """
-    duration = max(0.1, end - start)
+def _chat_overlay_message_text(message: dict, font_size: int, timestamp_size: int) -> str:
+    return (
+        rf"{{\fs{timestamp_size}\c&H00CFCFCF&}}{hms(int(message['absolute_second']))} "
+        rf"{{\fs{font_size}\c{message['color']}}}{message['user']}: "
+        rf"{{\c&H00FFFFFF&}}{message['body']}"
+    )
+
+
+def _chat_overlay_box(args, plan: dict | None = None) -> dict:
     x = int(getattr(args, "chat_overlay_x", 28))
     y = int(getattr(args, "chat_overlay_y", 92))
     width = int(getattr(args, "chat_overlay_width", 540))
     height = int(getattr(args, "chat_overlay_height", 246))
+    placement = str(getattr(args, "chat_overlay_placement", "auto")).lower()
+    camera = (plan or {}).get("camera_box") or {}
+
+    if placement == "below-camera" or (
+        placement == "auto"
+        and camera
+        and camera.get("x", 9999) < 720
+        and camera.get("y", 9999) < 260
+    ):
+        y = min(980 - height, int(camera.get("y", 0) + camera.get("h", 360) + 24))
+    elif placement == "above-camera" and camera:
+        y = max(28, int(camera.get("y", 0) - height - 24))
+
+    return {"x": x, "y": y, "w": width, "h": height, "placement": placement}
+
+
+def write_chat_overlay_ass(comments: list[dict], start: int, end: int, out_path: Path, args, plan: dict | None = None) -> dict:
+    """
+    Transparent chatlog-style overlay.
+
+    The overlay is rendered as rolling stack snapshots instead of independent
+    message fades. That keeps one active subtitle line per visible row, so
+    dense moments scroll naturally without text piling on top of itself.
+    """
+    duration = max(0.1, end - start)
+    box = _chat_overlay_box(args, plan)
+    x = box["x"]
+    y = box["y"]
+    width = box["w"]
+    height = box["h"]
     font_size = int(getattr(args, "chat_overlay_font_size", 26))
     line_h = max(font_size + 8, int(getattr(args, "chat_overlay_line_height", font_size + 8)))
     max_fit_lines = max(1, height // line_h)
@@ -706,8 +739,8 @@ def write_chat_overlay_ass(comments: list[dict], start: int, end: int, out_path:
         )
         lines.append(f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},ChatPanel,,0,0,0,,{panel}")
 
+    feed: list[dict] = []
     per_second: dict[int, int] = defaultdict(int)
-    event_index = 0
     for idx, comment in enumerate(comments):
         off = extract_offset(comment)
         if off is None or off < start or off > end:
@@ -723,23 +756,45 @@ def write_chat_overlay_ass(comments: list[dict], start: int, end: int, out_path:
         rel_end = min(duration, rel + hold)
         if rel_end <= rel:
             continue
-        slot = event_index % max_lines
-        y2 = y + slot * line_h
-        y1 = y2 + min(line_h, 20)
-        color = _ass_color_for_user(user)
-        text = (
-            rf"{{\clip({x},{y},{clip_right},{clip_bottom})\move({x},{y1},{x},{y2},0,350)\fad(60,180)}}"
-            rf"{{\fs{timestamp_size}\c&H00CFCFCF&}}{hms(sec)} "
-            rf"{{\fs{font_size}\c{color}}}{user}: "
-            rf"{{\c&H00FFFFFF&}}{body}"
-        )
-        lines.append(
-            f"Dialogue: 3,{_ass_time(rel)},{_ass_time(rel_end)},ChatLog,,0,0,0,,{text}"
-        )
+        feed.append({
+            "rel": rel,
+            "end": rel_end,
+            "absolute_second": sec,
+            "user": user,
+            "body": body,
+            "color": _ass_color_for_user(user),
+        })
         per_second[sec] += 1
-        event_index += 1
+
+    feed.sort(key=lambda item: item["rel"])
+    if feed:
+        breakpoints = {0.0, duration}
+        for message in feed:
+            breakpoints.add(round(float(message["rel"]), 3))
+            breakpoints.add(round(float(message["end"]), 3))
+        ordered_breakpoints = sorted(bp for bp in breakpoints if 0.0 <= bp <= duration)
+
+        for interval_start, interval_end in zip(ordered_breakpoints, ordered_breakpoints[1:]):
+            if interval_end - interval_start < 0.01:
+                continue
+            active = [
+                message for message in feed
+                if message["rel"] <= interval_start < message["end"]
+            ]
+            visible = active[-max_lines:]
+            for row, message in enumerate(visible):
+                row_y = y + row * line_h
+                text = (
+                    rf"{{\clip({x},{y},{clip_right},{clip_bottom})\pos({x},{row_y})}}"
+                    + _chat_overlay_message_text(message, font_size, timestamp_size)
+                )
+                lines.append(
+                    f"Dialogue: 3,{_ass_time(interval_start)},{_ass_time(interval_end)},"
+                    f"ChatLog,,0,0,0,,{text}"
+                )
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return box
 
 
 def _ffmpeg_filter_path(path: Path) -> str:
@@ -892,6 +947,24 @@ def choose_punch_target(width: int, height: int, faces: list[dict], signals: dic
     }
 
 
+def detect_streamer_camera_box(video: str | Path, timestamp: int, tmp_dir: Path) -> dict | None:
+    frame_path = tmp_dir / f"parasite_camera_probe_{timestamp}.jpg"
+    try:
+        extract_frame(video, timestamp, frame_path)
+    except Exception:
+        return None
+    faces = detect_faces(frame_path)
+    left_faces = [f for f in faces if f["cx"] < 760 and f["cy"] < 560]
+    if not left_faces:
+        return None
+    face = left_faces[0]
+    x = max(0, int(face["cx"] - 360))
+    y = max(0, int(face["cy"] - 260))
+    w = min(760, 1920 - x)
+    h = min(460, 1080 - y)
+    return {"x": x, "y": y, "w": w, "h": h, "face": face}
+
+
 def should_apply_shock_cam(signals: dict, min_mood: str = "SHOCK") -> bool:
     return (
         str(signals.get("dominant_mood", "")).upper() == str(min_mood or "SHOCK").upper()
@@ -929,12 +1002,8 @@ def build_effects_metadata(args, plan: dict, video_exists: bool) -> dict:
         "intro_zoom_skipped_reason": "shock_cam active" if args.intro_zoom and shock_requested else "",
         "video_probe_skipped": not video_exists,
         "chat_overlay": bool(getattr(args, "chat_overlay", False)),
-        "chat_overlay_box": {
-            "x": int(getattr(args, "chat_overlay_x", 28)),
-            "y": int(getattr(args, "chat_overlay_y", 92)),
-            "w": int(getattr(args, "chat_overlay_width", 540)),
-            "h": int(getattr(args, "chat_overlay_height", 246)),
-        },
+        "chat_overlay_box": (plan or {}).get("chat_overlay_box") or _chat_overlay_box(args, plan),
+        "camera_box": (plan or {}).get("camera_box"),
         "chat_overlay_bg_alpha": int(getattr(args, "chat_overlay_bg_alpha", 165)),
         "chat_overlay_path": "",
     }
@@ -1183,7 +1252,10 @@ def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms
             thumb_path = paths["thumbnail"]
             overlay_path = tmp_dir / f"{base}_chat.ass"
             if getattr(args, "chat_overlay", False):
-                write_chat_overlay_ass(comments, plan["start_seconds"], plan["end_seconds"], overlay_path, args)
+                if str(getattr(args, "chat_overlay_placement", "auto")).lower() == "auto":
+                    plan["camera_box"] = detect_streamer_camera_box(args.video, plan["peak_seconds"], tmp_dir)
+                box = write_chat_overlay_ass(comments, plan["start_seconds"], plan["end_seconds"], overlay_path, args, plan)
+                plan["chat_overlay_box"] = box
                 plan["chat_overlay_path"] = str(overlay_path)
             effects = prepare_effects(args, plan, tmp_dir)
             effects_public = {
@@ -1370,6 +1442,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--shock-cam-before-peak", type=float, default=0.5)
     p.add_argument("--shock-cam-min-mood", default="SHOCK")
     p.add_argument("--chat-overlay", action="store_true", help="Burn a transparent chatlog overlay above the camera area")
+    p.add_argument("--chat-overlay-placement", choices=["auto", "fixed", "below-camera", "above-camera"], default="auto",
+                   help="auto moves the overlay below a detected upper-left camera; fixed uses x/y directly")
     p.add_argument("--chat-overlay-x", type=int, default=28)
     p.add_argument("--chat-overlay-y", type=int, default=92)
     p.add_argument("--chat-overlay-width", type=int, default=540)
