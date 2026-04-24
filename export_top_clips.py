@@ -74,6 +74,7 @@ class OutputLayout:
     json: Path
     thumbnails: Path
     copy: Path
+    subtitles: Path
 STOPWORDS = {
     "A", "AN", "AND", "ARE", "AS", "AT", "BE", "BUT", "BY", "CAN", "DO",
     "FOR", "FROM", "GET", "GO", "GOT", "HAD", "HAS", "HAVE", "HE", "HER",
@@ -479,21 +480,24 @@ def suffix_slug(value: str) -> str:
 def build_output_layout(out_dir: Path, flat: bool = False) -> OutputLayout:
     out_dir = Path(out_dir).expanduser()
     if flat:
-        return OutputLayout(out_dir, out_dir, out_dir, out_dir, out_dir)
+        return OutputLayout(out_dir, out_dir, out_dir, out_dir, out_dir, out_dir)
     return OutputLayout(
         root=out_dir,
         videos=out_dir / "videos",
         json=out_dir / "json",
         thumbnails=out_dir / "thumbnails",
         copy=out_dir / "copy",
+        subtitles=out_dir / "subtitles",
     )
 
 
-def ensure_output_layout(layout: OutputLayout, thumbnail: bool = False) -> None:
+def ensure_output_layout(layout: OutputLayout, thumbnail: bool = False, subtitles: bool = False) -> None:
     for path in {layout.root, layout.videos, layout.json, layout.copy}:
         path.mkdir(parents=True, exist_ok=True)
     if thumbnail:
         layout.thumbnails.mkdir(parents=True, exist_ok=True)
+    if subtitles:
+        layout.subtitles.mkdir(parents=True, exist_ok=True)
 
 
 def clip_file_paths(layout: OutputLayout, base: str) -> dict[str, Path]:
@@ -501,6 +505,7 @@ def clip_file_paths(layout: OutputLayout, base: str) -> dict[str, Path]:
         "video": layout.videos / f"{base}.mp4",
         "metadata": layout.json / f"{base}.json",
         "thumbnail": layout.thumbnails / f"{base}.jpg",
+        "subtitles": layout.subtitles / f"{base}.srt",
     }
 
 
@@ -810,6 +815,98 @@ def _ffmpeg_filter_path(path: Path) -> str:
     return value
 
 
+def _srt_time(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int(round((seconds - int(seconds)) * 1000))
+    if millis >= 1000:
+        secs += 1
+        millis = 0
+    if secs >= 60:
+        minutes += 1
+        secs = 0
+    if minutes >= 60:
+        hours += 1
+        minutes = 0
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _subtitle_text(text: str) -> str:
+    text = html.unescape(str(text or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.replace("\n", " ")[:180]
+
+
+def extract_clip_audio(video: str | Path, start: int, end: int, out_path: Path) -> None:
+    cmd = [
+        "ffmpeg", "-y", "-ss", str(start), "-to", str(end), "-i", str(video),
+        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(out_path),
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def transcribe_clip_to_srt(
+    video: str | Path,
+    start: int,
+    end: int,
+    srt_path: Path,
+    tmp_dir: Path,
+    args,
+) -> dict:
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as e:
+        raise RuntimeError(
+            "Speech subtitles require faster-whisper. Install dependencies with: pip install -r requirements.txt"
+        ) from e
+
+    audio_path = tmp_dir / f"{srt_path.stem}_audio.wav"
+    extract_clip_audio(video, start, end, audio_path)
+    device = str(getattr(args, "subtitle_device", "cpu"))
+    if device == "auto":
+        device = "cpu"
+    model = WhisperModel(
+        str(getattr(args, "subtitle_model", "tiny")),
+        device=device,
+        compute_type=str(getattr(args, "subtitle_compute_type", "int8")),
+    )
+    language = getattr(args, "subtitle_language", None) or None
+    segments, info = model.transcribe(
+        str(audio_path),
+        language=language,
+        vad_filter=bool(getattr(args, "subtitle_vad", True)),
+        beam_size=int(getattr(args, "subtitle_beam_size", 1)),
+    )
+
+    entries = []
+    for segment in segments:
+        text = _subtitle_text(segment.text)
+        if not text:
+            continue
+        entries.append({
+            "start": max(0.0, float(segment.start)),
+            "end": min(float(end - start), max(float(segment.end), float(segment.start) + 0.25)),
+            "text": text,
+        })
+
+    with srt_path.open("w", encoding="utf-8") as f:
+        for idx, entry in enumerate(entries, 1):
+            f.write(f"{idx}\n")
+            f.write(f"{_srt_time(entry['start'])} --> {_srt_time(entry['end'])}\n")
+            f.write(f"{entry['text']}\n\n")
+
+    return {
+        "path": str(srt_path),
+        "format": "srt",
+        "model": str(getattr(args, "subtitle_model", "tiny")),
+        "language": getattr(info, "language", language or ""),
+        "language_probability": float(getattr(info, "language_probability", 0.0) or 0.0),
+        "segment_count": len(entries),
+    }
+
+
 def detect_faces(frame_path: Path) -> list[dict]:
     try:
         import cv2
@@ -980,7 +1077,13 @@ def should_apply_shock_cam(signals: dict, min_mood: str = "SHOCK") -> bool:
 
 
 def effects_enabled(args) -> bool:
-    return bool(args.polish or args.intro_zoom or args.shock_cam or getattr(args, "chat_overlay", False))
+    return bool(
+        args.polish
+        or args.intro_zoom
+        or args.shock_cam
+        or getattr(args, "chat_overlay", False)
+        or (getattr(args, "speech_subtitles", False) and not getattr(args, "subtitle_sidecar_only", False))
+    )
 
 
 def build_effects_metadata(args, plan: dict, video_exists: bool) -> dict:
@@ -988,7 +1091,13 @@ def build_effects_metadata(args, plan: dict, video_exists: bool) -> dict:
     shock_requested = bool(args.shock_cam and should_apply_shock_cam(signals, args.shock_cam_min_mood))
     fade_enabled = bool((args.polish or args.intro_zoom or shock_requested) and not getattr(args, "no_fade", False))
     return {
-        "polish": bool(args.polish or args.intro_zoom or shock_requested or getattr(args, "chat_overlay", False)),
+        "polish": bool(
+            args.polish
+            or args.intro_zoom
+            or shock_requested
+            or getattr(args, "chat_overlay", False)
+            or (getattr(args, "speech_subtitles", False) and not getattr(args, "subtitle_sidecar_only", False))
+        ),
         "fade_out": fade_enabled,
         "fade_duration": float(args.fade_duration),
         "intro_zoom": bool(args.intro_zoom and not shock_requested),
@@ -1012,6 +1121,10 @@ def build_effects_metadata(args, plan: dict, video_exists: bool) -> dict:
         "camera_box": (plan or {}).get("camera_box"),
         "chat_overlay_bg_alpha": int(getattr(args, "chat_overlay_bg_alpha", 165)),
         "chat_overlay_path": "",
+        "speech_subtitles": bool(getattr(args, "speech_subtitles", False)),
+        "speech_subtitle_path": "",
+        "speech_subtitle_burned": bool(getattr(args, "speech_subtitles", False) and not getattr(args, "subtitle_sidecar_only", False)),
+        "speech_subtitle_style": str(getattr(args, "subtitle_style", "")),
     }
 
 
@@ -1079,12 +1192,29 @@ def _append_chat_overlay(filtergraph: str, effects: dict) -> str:
     return f"[0:v]{sub}[vout]"
 
 
+def _append_speech_subtitles(filtergraph: str, effects: dict) -> str:
+    if not effects.get("speech_subtitle_burned") or not effects.get("speech_subtitle_path"):
+        return filtergraph
+    style = str(effects.get("speech_subtitle_style") or "")
+    sub = f"subtitles='{_ffmpeg_filter_path(Path(effects['speech_subtitle_path']))}'"
+    if style:
+        escaped_style = style.replace("\\", r"\\").replace("'", r"\'")
+        sub += f":force_style='{escaped_style}'"
+    if filtergraph.endswith("[vout]"):
+        return filtergraph[:-6] + f",{sub}[vout]"
+    return f"[0:v]{sub}[vout]"
+
+
 def prepare_effects(args, plan: dict, tmp_dir: Path | None = None) -> dict:
     video_local = bool(getattr(args, "video_is_local", False))
     video_probe_ok = video_local or (not args.dry_run and is_url(args.video))
     effects = build_effects_metadata(args, plan, video_probe_ok)
     if plan.get("chat_overlay_path"):
         effects["chat_overlay_path"] = str(plan["chat_overlay_path"])
+    if plan.get("speech_subtitle_path"):
+        effects["speech_subtitle_path"] = str(plan["speech_subtitle_path"])
+    if getattr(args, "speech_subtitles", False) and not getattr(args, "subtitle_sidecar_only", False):
+        effects["polish"] = True
     if not effects["polish"]:
         return effects
     if not video_probe_ok:
@@ -1127,7 +1257,9 @@ def prepare_effects(args, plan: dict, tmp_dir: Path | None = None) -> dict:
             height,
             effects,
         )
-        effects["filter_summary"] = _append_chat_overlay(filtergraph, effects)
+        filtergraph = _append_chat_overlay(filtergraph, effects)
+        filtergraph = _append_speech_subtitles(filtergraph, effects)
+        effects["filter_summary"] = filtergraph
         effects["audio_filter"] = audio_filter
     return effects
 
@@ -1243,7 +1375,7 @@ def select_clip_plans(
 
 def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms: set[str], comments: list[dict]) -> list[dict]:
     if not args.dry_run:
-        ensure_output_layout(layout, thumbnail=args.thumbnail)
+        ensure_output_layout(layout, thumbnail=args.thumbnail, subtitles=bool(getattr(args, "speech_subtitles", False)))
     clips = []
     with tempfile.TemporaryDirectory(prefix="parasite_export_") as td:
         tmp_dir = Path(td)
@@ -1256,6 +1388,7 @@ def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms
             mp4 = paths["video"]
             meta_path = paths["metadata"]
             thumb_path = paths["thumbnail"]
+            subtitle_path = paths["subtitles"]
             overlay_path = tmp_dir / f"{base}_chat.ass"
             if getattr(args, "chat_overlay", False):
                 if str(getattr(args, "chat_overlay_placement", "auto")).lower() == "auto":
@@ -1263,6 +1396,27 @@ def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms
                 box = write_chat_overlay_ass(comments, plan["start_seconds"], plan["end_seconds"], overlay_path, args, plan)
                 plan["chat_overlay_box"] = box
                 plan["chat_overlay_path"] = str(overlay_path)
+            subtitle_info = None
+            if getattr(args, "speech_subtitles", False):
+                plan["speech_subtitle_path"] = str(subtitle_path)
+                if not args.dry_run:
+                    subtitle_info = transcribe_clip_to_srt(
+                        args.video,
+                        plan["start_seconds"],
+                        plan["end_seconds"],
+                        subtitle_path,
+                        tmp_dir,
+                        args,
+                    )
+                else:
+                    subtitle_info = {
+                        "path": str(subtitle_path),
+                        "format": "srt",
+                        "model": str(getattr(args, "subtitle_model", "tiny")),
+                        "language": getattr(args, "subtitle_language", "") or "",
+                        "segment_count": None,
+                        "dry_run": True,
+                    }
             effects = prepare_effects(args, plan, tmp_dir)
             effects_public = {
                 k: v for k, v in effects.items()
@@ -1312,6 +1466,8 @@ def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms
                 "signals": plan["signals"],
                 "effects": effects_public,
             }
+            if subtitle_info:
+                meta["subtitles"] = subtitle_info
             if plan.get("included_despite"):
                 meta["included_despite"] = plan["included_despite"]
             assert_clean_copy(meta["title"], meta["description"], forbidden_terms)
@@ -1324,6 +1480,7 @@ def write_outputs(plans: list[dict], args, layout: OutputLayout, forbidden_terms
                 "metadata": meta,
                 "metadata_path": str(meta_path),
                 "thumbnail": str(thumb_path) if args.thumbnail else None,
+                "subtitles": str(subtitle_path) if getattr(args, "speech_subtitles", False) else None,
                 "ffmpeg_command": ffmpeg_cmd,
             }
             clips.append(clip)
@@ -1405,6 +1562,7 @@ def export_top_clips(args) -> dict:
             "json": str(layout.json),
             "thumbnails": str(layout.thumbnails),
             "copy": str(layout.copy),
+            "subtitles": str(layout.subtitles),
         },
         "dry_run": args.dry_run,
         "source_video": str(args.video),
@@ -1461,6 +1619,29 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--chat-overlay-line-height", type=int, default=34)
     p.add_argument("--chat-overlay-bg-alpha", type=int, default=255,
                    help="ASS alpha for overlay backing: 0 opaque, 255 invisible")
+    p.add_argument("--speech-subtitles", action="store_true",
+                   help="Generate speech-to-text SRT captions with faster-whisper and burn them into the clip")
+    p.add_argument("--subtitle-sidecar-only", action="store_true",
+                   help="Write .srt files without burning captions into the video")
+    p.add_argument("--subtitle-model", default="tiny",
+                   help="faster-whisper model name or local model path, e.g. tiny, base, small")
+    p.add_argument("--subtitle-language", default=None,
+                   help="Optional language code such as en. Leave empty for auto-detect")
+    p.add_argument("--subtitle-device", default="cpu", choices=["cpu", "cuda", "auto"])
+    p.add_argument("--subtitle-compute-type", default="int8",
+                   help="faster-whisper compute type, e.g. int8, float16, int8_float16")
+    p.add_argument("--subtitle-beam-size", type=int, default=1)
+    p.add_argument("--subtitle-vad", action=argparse.BooleanOptionalAction, default=True,
+                   help="Use voice activity detection while transcribing")
+    p.add_argument(
+        "--subtitle-style",
+        default=(
+            "Fontname=Arial,Fontsize=28,PrimaryColour=&H00FFFFFF,"
+            "OutlineColour=&HCC000000,BorderStyle=1,Outline=3,Shadow=1,"
+            "Alignment=2,MarginV=64"
+        ),
+        help="ASS force_style used when burning speech subtitles",
+    )
     return p
 
 
@@ -1482,7 +1663,8 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "Layout: "
             f"videos={layout.get('videos')} | json={layout.get('json')} | "
-            f"thumbnails={layout.get('thumbnails')} | copy={layout.get('copy')}"
+            f"thumbnails={layout.get('thumbnails')} | copy={layout.get('copy')} | "
+            f"subtitles={layout.get('subtitles')}"
         )
     for clip in result["clips"]:
         meta = clip["metadata"]
@@ -1520,6 +1702,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             if effects.get("intro_zoom_skipped_reason"):
                 print(f"  Intro zoom skipped: {effects['intro_zoom_skipped_reason']}")
+            if effects.get("speech_subtitles"):
+                print(
+                    "  Speech subtitles: "
+                    f"burned={effects.get('speech_subtitle_burned')} "
+                    f"path={effects.get('speech_subtitle_path')}"
+                )
             if effects.get("video_probe_skipped") and effects.get("polish"):
                 print("  Filter summary: skipped because source video is unavailable")
             elif effects.get("filter_summary"):

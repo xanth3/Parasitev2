@@ -3,3 +3,4 @@ requests>=2.31
 google-genai>=1.0
 groq>=0.11.0
 opencv-python>=4.9
+faster-whisper>=1.1.0

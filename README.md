@@ -116,6 +116,13 @@ python export_top_clips.py archive/<dir>/viral_score.csv \
   --video path/to/vod.mp4 \
   --top 5 --pad 10 \
   --polish --intro-zoom --shock-cam --thumbnail
+
+# optional speech-to-text subtitles with faster-whisper
+python export_top_clips.py archive/<dir>/viral_score.csv \
+  --chat archive/<dir>/chat.json \
+  --video path/to/vod.mp4 \
+  --top 5 --pad 10 \
+  --speech-subtitles --subtitle-model tiny
 ```
 
 Outputs: `heatmap.png`, `peaks.csv`, `peaks_detail.md`, plus clip exports in
@@ -129,6 +136,11 @@ Polished exports use ffmpeg filters and force re-encode. `--polish` adds video
 and audio fade-out, `--intro-zoom` adds a slow opening zoom-out, and
 `--shock-cam` punches in on SHOCK windows. Face targeting uses OpenCV Haar
 cascade detection first; if no face is found, it falls back to a center crop.
+
+`--speech-subtitles` extracts each clip's audio, transcribes it locally with
+`faster-whisper`, writes an `.srt` sidecar to `subtitles/`, and burns captions
+into the exported MP4. Use `--subtitle-sidecar-only` to write SRT files without
+burning them in. Subtitle styling is controlled with `--subtitle-style`.
 
 Gemini remains the default Symbot provider. If Gemini hits quota/rate-limit
 exhaustion, Symbot automatically falls back to Groq for the current turn when
