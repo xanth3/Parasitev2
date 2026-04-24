@@ -817,10 +817,12 @@ def main():
                       spinner=spinner)
         except DailyQuotaExhausted:
             spinner.stop()
-            print("\n[daily free-tier quota exhausted — Symbiote is out of juice for today.]")
-            print("Try again tomorrow, or check https://ai.google.dev/gemini-api/docs/rate-limits")
+            B, H, D, R = WormSpinner.BODY, WormSpinner.HEAD, WormSpinner.DIM, WormSpinner.RESET
+            print(f"\n  {B}~∿⁓∿~⁓{H}◉{R} quota exhausted — the worm is dry for today.")
+            print(f"  {D}· free tier caps at 20 requests/day on gemini-2.5-flash.{R}")
+            print(f"  {D}· try again tomorrow, or grab a paid key at https://aistudio.google.com{R}")
             try:
-                ans = input("exit now? [y/n] ").strip().lower()
+                ans = input(f"\n  {D}exit now?{R} [y/n] ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 ans = "y"
             if ans in ("y", "yes"):
