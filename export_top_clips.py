@@ -666,6 +666,7 @@ def _chat_overlay_box(args, plan: dict | None = None) -> dict:
     height = int(getattr(args, "chat_overlay_height", 246))
     placement = str(getattr(args, "chat_overlay_placement", "auto")).lower()
     camera = (plan or {}).get("camera_box") or {}
+    gap = 24
 
     if placement == "below-camera" or (
         placement == "auto"
@@ -673,9 +674,14 @@ def _chat_overlay_box(args, plan: dict | None = None) -> dict:
         and camera.get("x", 9999) < 720
         and camera.get("y", 9999) < 260
     ):
-        y = min(980 - height, int(camera.get("y", 0) + camera.get("h", 360) + 24))
+        y = min(980 - height, int(camera.get("y", 0) + camera.get("h", 360) + gap))
     elif placement == "above-camera" and camera:
-        y = max(28, int(camera.get("y", 0) - height - 24))
+        y = max(28, int(camera.get("y", 0) - height - gap))
+    elif placement == "auto" and camera and camera.get("x", 9999) < 720:
+        camera_top = int(camera.get("y", 1080))
+        if y < camera_top:
+            height = max(1, min(height, camera_top - y - gap))
+            width = max(240, min(width, int(camera.get("x", 0) + camera.get("w", width) - x)))
 
     return {"x": x, "y": y, "w": width, "h": height, "placement": placement}
 
@@ -954,7 +960,7 @@ def detect_streamer_camera_box(video: str | Path, timestamp: int, tmp_dir: Path)
     except Exception:
         return None
     faces = detect_faces(frame_path)
-    left_faces = [f for f in faces if f["cx"] < 760 and f["cy"] < 560]
+    left_faces = [f for f in faces if f["cx"] < 760]
     if not left_faces:
         return None
     face = left_faces[0]
@@ -1453,7 +1459,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--chat-overlay-max-per-second", type=int, default=2)
     p.add_argument("--chat-overlay-font-size", type=int, default=26)
     p.add_argument("--chat-overlay-line-height", type=int, default=34)
-    p.add_argument("--chat-overlay-bg-alpha", type=int, default=165,
+    p.add_argument("--chat-overlay-bg-alpha", type=int, default=255,
                    help="ASS alpha for overlay backing: 0 opaque, 255 invisible")
     return p
 
