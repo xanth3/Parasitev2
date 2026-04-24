@@ -14,11 +14,40 @@ answers. Powered by Gemini (free tier).
 
 ```bash
 pip install -r requirements.txt
+
 # Get a free key at https://aistudio.google.com/app/apikey
-setx GEMINI_API_KEY "AIza..."         # PowerShell (close + reopen terminal)
-# or: export GEMINI_API_KEY='AIza...'  # bash
+# Easiest: create a .env file next to symbiote.py
+cp .env.example .env
+# edit .env and paste your key
+
 python symbiote.py                    # defaults to Gemini 2.5 Flash
 python symbiote.py --pro              # Gemini 2.5 Pro (smaller free quota)
+```
+
+The key can also be set as a system env var (`setx GEMINI_API_KEY "AIza..."` on
+Windows, `export GEMINI_API_KEY='AIza...'` on bash) — that always wins over `.env`.
+
+### One-word command
+
+Add the repo directory to your PATH once, then just type `symbiote` from anywhere.
+
+**Windows (PowerShell, once):**
+```powershell
+$p = "C:\Users\DARKLXRD\Desktop\Parasitev2"   # adjust to your clone path
+[Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$p", "User")
+# close + reopen terminal, then:
+symbiote
+symbiote --pro
+```
+
+**macOS / Linux (once):**
+```bash
+echo 'export PATH="$PATH:/path/to/Parasitev2"' >> ~/.bashrc   # or ~/.zshrc
+chmod +x /path/to/Parasitev2/symbiote
+source ~/.bashrc
+# then:
+symbiote
+symbiote --pro
 ```
 
 Example session:
