@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -661,7 +662,19 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
     }
 
 
-def tool_export_top_clips(vod_id, top=5, from_top=15, pad=10, fast=False, thumbnail=True):
+def tool_export_top_clips(
+    vod_id,
+    top=5,
+    from_top=15,
+    pad=10,
+    fast=False,
+    thumbnail=True,
+    speech_subtitles=False,
+    subtitle_sidecar_only=False,
+    subtitle_model="tiny",
+    subtitle_language=None,
+    subtitle_font_size=28,
+):
     """Export the best scored Siphon clips for a VOD to ~/Desktop/VODClips."""
     d = vod_archive_dir(vod_id)
     cp = chat_path(vod_id)
@@ -687,7 +700,10 @@ def tool_export_top_clips(vod_id, top=5, from_top=15, pad=10, fast=False, thumbn
             top=int(top),
             from_top=int(from_top),
             pad=int(pad),
+            analysis_pad=None,
             out=str(VOD_CLIPS_DIR),
+            filename_suffix="",
+            flat_output=False,
             fast=bool(fast),
             dry_run=False,
             min_score=0,
@@ -702,6 +718,32 @@ def tool_export_top_clips(vod_id, top=5, from_top=15, pad=10, fast=False, thumbn
             shock_cam_scale=1.35,
             shock_cam_before_peak=0.5,
             shock_cam_min_mood="SHOCK",
+            shock_cam_target="auto",
+            no_fade=False,
+            chat_overlay=False,
+            chat_overlay_placement="auto",
+            chat_overlay_x=28,
+            chat_overlay_y=92,
+            chat_overlay_width=540,
+            chat_overlay_height=246,
+            chat_overlay_lines=7,
+            chat_overlay_duration=6.0,
+            chat_overlay_max_per_second=2,
+            chat_overlay_font_size=26,
+            chat_overlay_line_height=34,
+            chat_overlay_bg_alpha=255,
+            speech_subtitles=bool(speech_subtitles),
+            subtitle_sidecar_only=bool(subtitle_sidecar_only),
+            subtitle_model=str(subtitle_model or "tiny"),
+            subtitle_language=subtitle_language or None,
+            subtitle_device="cpu",
+            subtitle_compute_type="int8",
+            subtitle_beam_size=1,
+            subtitle_vad=True,
+            subtitle_style=(
+                f"Fontname=Arial,Fontsize={int(subtitle_font_size)},PrimaryColour=&H00FFFFFF,"
+                "OutlineColour=&HCC000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=64"
+            ),
         )
         result = export_top_clips(args)
     except Exception as e:
@@ -714,6 +756,7 @@ def tool_export_top_clips(vod_id, top=5, from_top=15, pad=10, fast=False, thumbn
             "filename": clip.get("filename"),
             "metadata_path": clip.get("metadata_path"),
             "thumbnail": clip.get("thumbnail"),
+            "subtitles": clip.get("subtitles"),
             "title": meta.get("title"),
             "description": meta.get("description"),
             "start": meta.get("start_timestamp"),
@@ -809,6 +852,11 @@ TOOLS = [
                 "pad": {"type": "integer", "description": "Seconds before/after peak", "default": 10},
                 "fast": {"type": "boolean", "description": "Use ffmpeg stream copy", "default": False},
                 "thumbnail": {"type": "boolean", "description": "Export JPG thumbnails", "default": True},
+                "speech_subtitles": {"type": "boolean", "description": "Generate speech-to-text SRT subtitles and burn them into clips", "default": False},
+                "subtitle_sidecar_only": {"type": "boolean", "description": "Write SRT files without burning subtitles into the video", "default": False},
+                "subtitle_model": {"type": "string", "description": "faster-whisper model, e.g. tiny, base, small", "default": "tiny"},
+                "subtitle_language": {"type": "string", "description": "Optional language code such as en"},
+                "subtitle_font_size": {"type": "integer", "description": "Burned subtitle font size", "default": 28},
             },
             "required": ["vod_id"],
         },
@@ -1042,6 +1090,8 @@ def _print_tool_result(result: dict) -> None:
             else:
                 print(f"  {c.get('filename')}  {c.get('start')} - {c.get('end')}  "
                       f"{c.get('score')}/100  {c.get('title')}")
+                if c.get("subtitles"):
+                    print(f"      subtitles -> {c['subtitles']}")
         art = result.get("artifacts", {})
         if art.get("siphon_report_md"):
             print(f"  report → {art['siphon_report_md']}")
@@ -1054,6 +1104,38 @@ def _print_tool_result(result: dict) -> None:
         return
     # Fallback: compact JSON
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+def _parse_manual_export_args(rest: str) -> dict | None:
+    parser = argparse.ArgumentParser(prog="export", add_help=False)
+    parser.add_argument("vod_id")
+    parser.add_argument("top", nargs="?", type=int, default=5)
+    parser.add_argument("--from-top", type=int, default=15)
+    parser.add_argument("--pad", type=int, default=10)
+    parser.add_argument("--fast", action="store_true")
+    parser.add_argument("--no-thumbnail", action="store_true")
+    parser.add_argument("--subtitles", "--speech-subtitles", dest="speech_subtitles", action="store_true")
+    parser.add_argument("--subtitle-sidecar-only", action="store_true")
+    parser.add_argument("--subtitle-model", default="tiny")
+    parser.add_argument("--subtitle-language", default=None)
+    parser.add_argument("--subtitle-font-size", type=int, default=28)
+    try:
+        ns = parser.parse_args(shlex.split(rest))
+    except (SystemExit, ValueError):
+        return None
+    return {
+        "vod_id": ns.vod_id,
+        "top": ns.top,
+        "from_top": ns.from_top,
+        "pad": ns.pad,
+        "fast": ns.fast,
+        "thumbnail": not ns.no_thumbnail,
+        "speech_subtitles": ns.speech_subtitles,
+        "subtitle_sidecar_only": ns.subtitle_sidecar_only,
+        "subtitle_model": ns.subtitle_model,
+        "subtitle_language": ns.subtitle_language,
+        "subtitle_font_size": ns.subtitle_font_size,
+    }
 
 
 _MANUAL_MENU = [
@@ -1083,7 +1165,21 @@ def _menu_command_line(cmd: str) -> str:
         top = ""
         if cmd in ("peaks", "score", "export"):
             top = input("top [Enter for default]: ").strip()
-        return f"{cmd} {vod}" + (f" {top}" if top else "")
+        line = f"{cmd} {vod}" + (f" {top}" if top else "")
+        if cmd == "export":
+            subtitles = input("speech subtitles? [y/N] ").strip().lower()
+            if subtitles in ("y", "yes"):
+                line += " --subtitles"
+                model = input("subtitle model [tiny]: ").strip()
+                if model:
+                    line += f" --subtitle-model {model}"
+                font_size = input("subtitle font size [28]: ").strip()
+                if font_size:
+                    line += f" --subtitle-font-size {font_size}"
+                sidecar = input("SRT only, no burn-in? [y/N] ").strip().lower()
+                if sidecar in ("y", "yes"):
+                    line += " --subtitle-sidecar-only"
+        return line
     if cmd == "window":
         vod = input("vod id: ").strip()
         start = input("start timestamp: ").strip()
@@ -1172,7 +1268,7 @@ def manual_repl(args=None) -> None:
     print("  list                         show archived VODs")
     print("  peaks <id> [top=15]          raw peak density")
     print("  score <id> [top=15]          Siphon virality scoring")
-    print("  export <id> [top=5]          cut top clips to Desktop/VODClips")
+    print("  export <id> [top=5] [--subtitles] cut top clips to Desktop/VODClips")
     print("  window <id> <start> [dur=60] analyze a timestamp window")
     print("  search <id> <pattern>        regex search chat")
     print("  heatmap <id>                 open heatmap PNG")
@@ -1198,7 +1294,8 @@ def manual_repl(args=None) -> None:
             return
         elif cmd == "help":
             print("  fetch <url|id> [no-video]  |  list  |  peaks <id> [top]")
-            print("  score <id> [top]           |  export <id> [top]")
+            print("  score <id> [top]           |  export <id> [top] [--subtitles]")
+            print("  export subtitle flags: --subtitle-model tiny|base|small, --subtitle-font-size 28, --subtitle-sidecar-only")
             print("  window <id> <start> [dur]  |  search <id> <pattern>")
             print("  heatmap <id>")
             print("  agent                      |  quit")
@@ -1235,13 +1332,13 @@ def manual_repl(args=None) -> None:
                 kwargs["top"] = int(argv[1])
             _print_tool_result(run_tool("get_virality", kwargs))
         elif cmd == "export":
-            argv = rest.split()
-            if not argv:
-                print("  usage: export <vod_id> [top]")
+            if not rest.strip():
+                print("  usage: export <vod_id> [top] [--subtitles] [--subtitle-model tiny] [--subtitle-font-size 28]")
                 continue
-            kwargs = {"vod_id": argv[0]}
-            if len(argv) > 1 and argv[1].isdigit():
-                kwargs["top"] = int(argv[1])
+            kwargs = _parse_manual_export_args(rest)
+            if kwargs is None:
+                print("  usage: export <vod_id> [top] [--subtitles] [--subtitle-model tiny] [--subtitle-font-size 28]")
+                continue
             _print_tool_result(run_tool("export_top_clips", kwargs))
         elif cmd == "window":
             argv = rest.split()
