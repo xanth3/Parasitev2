@@ -21,6 +21,29 @@ python symbiote.py                    # defaults to Gemini 2.5 Flash
 python symbiote.py --pro              # Gemini 2.5 Pro (smaller free quota)
 ```
 
+### One-word command
+
+Add the repo directory to your PATH once, then just type `symbiote` from anywhere.
+
+**Windows (PowerShell, once):**
+```powershell
+$p = "C:\Users\DARKLXRD\Desktop\Parasitev2"   # adjust to your clone path
+[Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$p", "User")
+# close + reopen terminal, then:
+symbiote
+symbiote --pro
+```
+
+**macOS / Linux (once):**
+```bash
+echo 'export PATH="$PATH:/path/to/Parasitev2"' >> ~/.bashrc   # or ~/.zshrc
+chmod +x /path/to/Parasitev2/symbiote
+source ~/.bashrc
+# then:
+symbiote
+symbiote --pro
+```
+
 Example session:
 
 ```text
