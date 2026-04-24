@@ -27,6 +27,25 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Load KEY=VALUE pairs from .env in the same directory as this script.
+# Only sets keys not already present in the environment, so a real env var
+# always wins over .env.
+def _load_dotenv():
+    env_file = Path(__file__).with_name(".env")
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
+
+_load_dotenv()
+
 import requests
 from google import genai
 from google.genai import types
@@ -745,9 +764,13 @@ def main():
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        print("Symbiote needs GEMINI_API_KEY (or GOOGLE_API_KEY) in your environment.")
-        print("Get a free key at https://aistudio.google.com/app/apikey, then:")
-        print("  PowerShell:  setx GEMINI_API_KEY \"AIza...\"  (close+reopen terminal)")
+        print("Symbiote needs GEMINI_API_KEY. Get a free key at https://aistudio.google.com/app/apikey")
+        print()
+        print("Easiest — create a .env file next to symbiote.py:")
+        print("  GEMINI_API_KEY=AIza...")
+        print()
+        print("Or set it in your shell:")
+        print("  PowerShell:  setx GEMINI_API_KEY \"AIza...\"  (close + reopen terminal)")
         print("  bash:        export GEMINI_API_KEY='AIza...'")
         sys.exit(1)
 
