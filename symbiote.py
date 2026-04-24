@@ -213,7 +213,7 @@ def _download_video(vod_id: str) -> "str | None":
     VODS_DIR.mkdir(parents=True, exist_ok=True)
     url = f"https://www.twitch.tv/videos/{vod_id}"
     tmpl = str(VODS_DIR / "%(uploader_id)s_%(upload_date)s_v%(id)s.%(ext)s")
-    cmd = ["yt-dlp", "-o", tmpl, "--no-progress", url]
+    cmd = ["yt-dlp", "-o", tmpl, "--no-progress", "--concurrent-fragments", "8", url]
     try:
         print(f"    [downloading video → {VODS_DIR}… this may take a while]", flush=True)
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=14400)

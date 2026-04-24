@@ -539,16 +539,30 @@ def twitch_vod_url(vod_id: str) -> str:
 
 def resolve_stream_url(url: str) -> str:
     """Resolve a Twitch page URL into a direct media URL ffmpeg can read."""
-    try:
-        out = subprocess.check_output(
-            ["yt-dlp", "-g", url],
-            text=True,
-            stderr=subprocess.STDOUT,
-            timeout=120,
-        )
-    except FileNotFoundError as e:
-        raise RuntimeError("yt-dlp is required to process Twitch URLs when no local VOD file exists") from e
-    lines = [line.strip() for line in out.splitlines() if line.strip().startswith(("http://", "https://"))]
+    commands = [
+        ["yt-dlp", "-g", url],
+        [sys.executable, "-m", "yt_dlp", "-g", url],
+    ]
+    output = ""
+    for cmd in commands:
+        try:
+            output = subprocess.check_output(
+                cmd,
+                text=True,
+                stderr=subprocess.STDOUT,
+                timeout=120,
+            )
+            break
+        except FileNotFoundError:
+            continue
+        except subprocess.CalledProcessError as e:
+            output = str(e.output or "")
+            continue
+    else:
+        raise RuntimeError("yt-dlp is required to process Twitch URLs when no local VOD file exists")
+    if not output:
+        raise RuntimeError(f"yt-dlp did not return output for {url}")
+    lines = [line.strip() for line in output.splitlines() if line.strip().startswith(("http://", "https://"))]
     if not lines:
         raise RuntimeError(f"yt-dlp did not return a playable media URL for {url}")
     return lines[0]
@@ -922,7 +936,11 @@ def detect_faces(frame_path: Path) -> list[dict]:
         return []
     faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
     found = []
+    min_side = max(70, int(min(image.shape[:2]) * 0.055))
     for x, y, w, h in faces:
+        aspect = float(w) / float(h or 1)
+        if w < min_side or h < min_side or not 0.70 <= aspect <= 1.35:
+            continue
         found.append({
             "x": int(x), "y": int(y), "w": int(w), "h": int(h),
             "cx": float(x + w / 2), "cy": float(y + h / 2),
@@ -956,6 +974,26 @@ def compute_punch_crop(width: int, height: int, face_box: dict | None, scale: fl
         crop_w = width / scale
         crop_h = height / scale
 
+    crop_w = min(width, _even(crop_w))
+    crop_h = min(height, _even(crop_h))
+    crop_x = _even(max(0, min(width - crop_w, cx - crop_w / 2)), 0)
+    crop_y = _even(max(0, min(height - crop_h, cy - crop_h / 2)), 0)
+    return {"x": crop_x, "y": crop_y, "w": crop_w, "h": crop_h}
+
+
+def compute_face_focus_crop(width: int, height: int, face_box: dict | None, coverage: float, fallback_scale: float) -> dict:
+    """Crop around a detected face so it occupies a target share of frame height."""
+    if not face_box:
+        return compute_center_crop(width, height, width / 2, height / 2, fallback_scale)
+    coverage = max(0.20, min(0.95, float(coverage)))
+    cx, cy = face_box["cx"], face_box["cy"]
+    crop_h = max(face_box["h"] / coverage, face_box["h"] * 1.35)
+    crop_w = crop_h * width / height
+    if crop_w < face_box["w"] * 1.6:
+        crop_w = face_box["w"] * 1.6
+        crop_h = crop_w * height / width
+    if crop_w > width or crop_h > height:
+        return compute_punch_crop(width, height, face_box, fallback_scale)
     crop_w = min(width, _even(crop_w))
     crop_h = min(height, _even(crop_h))
     crop_x = _even(max(0, min(width - crop_w, cx - crop_w / 2)), 0)
@@ -1068,10 +1106,15 @@ def detect_streamer_camera_box(video: str | Path, timestamp: int, tmp_dir: Path)
     return {"x": x, "y": y, "w": w, "h": h, "face": face}
 
 
-def should_apply_shock_cam(signals: dict, min_mood: str = "SHOCK") -> bool:
+def should_apply_shock_cam(signals: dict, min_mood: str = "SHOCK", allow_noise: bool = False) -> bool:
+    requested = str(min_mood or "SHOCK").upper()
+    if requested in {"ANY", "ALL"}:
+        mood_ok = bool(str(signals.get("dominant_mood", "")).strip())
+    else:
+        mood_ok = str(signals.get("dominant_mood", "")).upper() == requested
     return (
-        str(signals.get("dominant_mood", "")).upper() == str(min_mood or "SHOCK").upper()
-        and int(signals.get("noise_hits", 0) or 0) == 0
+        mood_ok
+        and (allow_noise or int(signals.get("noise_hits", 0) or 0) == 0)
         and not signals.get("break_marker")
     )
 
@@ -1088,7 +1131,11 @@ def effects_enabled(args) -> bool:
 
 def build_effects_metadata(args, plan: dict, video_exists: bool) -> dict:
     signals = plan["signals"]
-    shock_requested = bool(args.shock_cam and should_apply_shock_cam(signals, args.shock_cam_min_mood))
+    shock_requested = bool(args.shock_cam and should_apply_shock_cam(
+        signals,
+        args.shock_cam_min_mood,
+        bool(getattr(args, "shock_cam_allow_noise", False)),
+    ))
     fade_enabled = bool((args.polish or args.intro_zoom or shock_requested) and not getattr(args, "no_fade", False))
     return {
         "polish": bool(
@@ -1108,12 +1155,17 @@ def build_effects_metadata(args, plan: dict, video_exists: bool) -> dict:
         "shock_cam_resolved_target": "",
         "shock_cam_duration": float(args.shock_cam_duration),
         "shock_cam_scale": float(args.shock_cam_scale),
+        "shock_cam_full_scale": float(getattr(args, "shock_cam_full_scale", 2.15)),
+        "shock_cam_full_face_coverage": float(getattr(args, "shock_cam_full_face_coverage", 0.82)),
+        "shock_cam_medium_face_coverage": float(getattr(args, "shock_cam_medium_face_coverage", 0.62)),
         "shock_cam_reason": "dominant mood was SHOCK" if shock_requested else "",
         "face_count": 0,
         "face_detected": False,
         "selected_face": None,
         "target_region": None,
         "crop": None,
+        "crop_full": None,
+        "crop_medium": None,
         "intro_zoom_skipped_reason": "shock_cam active" if args.intro_zoom and shock_requested else "",
         "video_probe_skipped": not video_exists,
         "chat_overlay": bool(getattr(args, "chat_overlay", False)),
@@ -1148,7 +1200,9 @@ def build_polish_filter(args, clip_duration: float, width: int, height: int, eff
         shock_end = min(clip_duration, shock_start + float(args.shock_cam_duration))
         if shock_end <= shock_start:
             shock_start, shock_end = 0.0, min(clip_duration, float(args.shock_cam_duration))
-        crop = effects["crop"]
+        crop_full = effects.get("crop_full") or effects["crop"]
+        crop_medium = effects.get("crop_medium") or effects["crop"]
+        split_at = min(shock_end, shock_start + max(0.25, (shock_end - shock_start) * 0.45))
         specs = []
         labels = []
         idx = 0
@@ -1157,11 +1211,18 @@ def build_polish_filter(args, clip_duration: float, width: int, height: int, eff
             labels.append(f"[v{idx}]")
             idx += 1
         specs.append(
-            f"[0:v]trim=start={shock_start:.3f}:end={shock_end:.3f},setpts=PTS-STARTPTS,"
-            f"crop={crop['w']}:{crop['h']}:{crop['x']}:{crop['y']},scale={width}:{height},setsar=1[v{idx}]"
+            f"[0:v]trim=start={shock_start:.3f}:end={split_at:.3f},setpts=PTS-STARTPTS,"
+            f"crop={crop_full['w']}:{crop_full['h']}:{crop_full['x']}:{crop_full['y']},scale={width}:{height},setsar=1[v{idx}]"
         )
         labels.append(f"[v{idx}]")
         idx += 1
+        if shock_end - split_at > 0.01:
+            specs.append(
+                f"[0:v]trim=start={split_at:.3f}:end={shock_end:.3f},setpts=PTS-STARTPTS,"
+                f"crop={crop_medium['w']}:{crop_medium['h']}:{crop_medium['x']}:{crop_medium['y']},scale={width}:{height},setsar=1[v{idx}]"
+            )
+            labels.append(f"[v{idx}]")
+            idx += 1
         if shock_end < clip_duration - 0.01:
             specs.append(f"[0:v]trim=start={shock_end:.3f}:end={clip_duration:.3f},setpts=PTS-STARTPTS[v{idx}]")
             labels.append(f"[v{idx}]")
@@ -1243,10 +1304,28 @@ def prepare_effects(args, plan: dict, tmp_dir: Path | None = None) -> dict:
         box = target.get("box")
         if target.get("kind") == "region" and box:
             effects["crop"] = compute_center_crop(width, height, box["cx"], box["cy"], float(args.shock_cam_scale))
+            effects["crop_full"] = compute_center_crop(width, height, box["cx"], box["cy"], float(getattr(args, "shock_cam_full_scale", 2.15)))
+            effects["crop_medium"] = effects["crop"]
         elif target.get("kind") == "center" or not box:
             effects["crop"] = compute_center_crop(width, height, width / 2, height / 2, float(args.shock_cam_scale))
+            effects["crop_full"] = compute_center_crop(width, height, width / 2, height / 2, float(getattr(args, "shock_cam_full_scale", 2.15)))
+            effects["crop_medium"] = effects["crop"]
         else:
             effects["crop"] = compute_punch_crop(width, height, box, float(args.shock_cam_scale))
+            effects["crop_full"] = compute_face_focus_crop(
+                width,
+                height,
+                box,
+                float(getattr(args, "shock_cam_full_face_coverage", 0.82)),
+                float(getattr(args, "shock_cam_full_scale", 2.15)),
+            )
+            effects["crop_medium"] = compute_face_focus_crop(
+                width,
+                height,
+                box,
+                float(getattr(args, "shock_cam_medium_face_coverage", 0.62)),
+                float(args.shock_cam_scale),
+            )
     effects["_peak_rel"] = float(plan["peak_seconds"] - plan["start_seconds"])
     effects["filter_summary"] = ""
     if effects["polish"]:
@@ -1603,8 +1682,17 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Target for punch-in zoom: auto, streamer webcam, main content, center, or largest detected face")
     p.add_argument("--shock-cam-duration", type=float, default=2.0)
     p.add_argument("--shock-cam-scale", type=float, default=1.35)
+    p.add_argument("--shock-cam-full-scale", type=float, default=2.15,
+                   help="Tighter fallback crop scale used for the first high-intensity punch-in")
+    p.add_argument("--shock-cam-full-face-coverage", type=float, default=0.82,
+                   help="When a face is detected, target face height share for the first punch-in")
+    p.add_argument("--shock-cam-medium-face-coverage", type=float, default=0.62,
+                   help="When a face is detected, target face height share for the second punch-in")
     p.add_argument("--shock-cam-before-peak", type=float, default=0.5)
-    p.add_argument("--shock-cam-min-mood", default="SHOCK")
+    p.add_argument("--shock-cam-min-mood", default="SHOCK",
+                   help="Dominant mood required for punch-in. Use ANY to focus every selected non-noise clip.")
+    p.add_argument("--shock-cam-allow-noise", action="store_true",
+                   help="Allow focus punch-in on noisy but still selected clips. Break markers still block it.")
     p.add_argument("--chat-overlay", action="store_true", help="Burn a transparent chatlog overlay above the camera area")
     p.add_argument("--chat-overlay-placement", choices=["auto", "fixed", "below-camera", "above-camera"], default="auto",
                    help="auto moves the overlay below a detected upper-left camera; fixed uses x/y directly")
