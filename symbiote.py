@@ -47,8 +47,13 @@ def _load_dotenv():
 _load_dotenv()
 
 import requests
-from google import genai
-from google.genai import types
+from llm_client import (
+    GeminiLLMClient,
+    GroqLLMClient,
+    ProviderConfigError,
+    ProviderQuotaError,
+    resolve_model,
+)
 
 # Windows consoles default to cp1252 — force utf-8 so the agent's prose
 # (→, ×, em-dashes, emotes) doesn't crash on output.
@@ -58,10 +63,6 @@ for _stream in (sys.stdout, sys.stderr):
             _stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-
-
-class DailyQuotaExhausted(Exception):
-    pass
 
 
 # ---- Worm spinner -------------------------------------------------------
@@ -165,9 +166,10 @@ from viral_score import (
 GQL_HEADERS = {"Client-ID": CLIENT_ID, "Content-Type": "application/json"}
 ARCHIVE_DIR = Path("archive")
 
-# VOD video download destination.  Override with VODS_DIR env var.
+# VOD video source directory. Override with VODS_DIR env var.
 # Defaults to ~/Desktop/VODs so on Windows this lands at C:\Users\<you>\Desktop\VODs.
 VODS_DIR = Path(os.environ.get("VODS_DIR", Path.home() / "Desktop" / "VODs"))
+VOD_CLIPS_DIR = Path(os.environ.get("VOD_CLIPS_DIR", Path.home() / "Desktop" / "VODClips"))
 
 
 def _safe_slug(s, maxlen=40):
@@ -179,10 +181,24 @@ def _safe_slug(s, maxlen=40):
 def _video_exists(vod_id: str) -> "Path | None":
     """Return path to an already-downloaded video for vod_id, or None."""
     if VODS_DIR.exists():
-        hits = list(VODS_DIR.glob(f"*_v{vod_id}.*"))
-        if hits:
-            return hits[0]
+        candidates = []
+        for p in VODS_DIR.iterdir():
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in {".mp4", ".mkv", ".mov", ".webm", ".avi", ".flv", ".m4v"}:
+                continue
+            if vod_id in p.stem:
+                candidates.append(p)
+        if candidates:
+            return sorted(candidates, key=lambda p: len(p.name))[0]
     return None
+
+
+def _video_source_for(vod_id: str) -> str:
+    existing = _video_exists(vod_id)
+    if existing:
+        return str(existing)
+    return f"https://www.twitch.tv/videos/{vod_id}"
 
 
 def _download_video(vod_id: str) -> "str | None":
@@ -203,8 +219,8 @@ def _download_video(vod_id: str) -> "str | None":
         if r.returncode != 0:
             print(f"    [video download failed: {r.stderr[:200].strip()}]", flush=True)
             return None
-        hits = list(VODS_DIR.glob(f"*_v{vod_id}.*"))
-        return str(hits[0]) if hits else None
+        hit = _video_exists(vod_id)
+        return str(hit) if hit else None
     except FileNotFoundError:
         print("    [video download skipped — yt-dlp not found in PATH]", flush=True)
         return None
@@ -581,7 +597,7 @@ def tool_open_heatmap(vod_id):
         os.startfile(str(png))
         return {"opened": str(png)}
     except Exception as e:
-        return {"error": str(e), "path": str(png)}
+        return {"error": f"could not open heatmap: {e}", "path": str(png)}
 
 
 def tool_get_virality(vod_id, top=15, bin_size=60):
@@ -645,6 +661,73 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
     }
 
 
+def tool_export_top_clips(vod_id, top=5, from_top=15, pad=10, fast=False, thumbnail=True):
+    """Export the best scored Siphon clips for a VOD to ~/Desktop/VODClips."""
+    d = vod_archive_dir(vod_id)
+    cp = chat_path(vod_id)
+    if not d or not cp:
+        return {"error": f"No archived chat found for VOD {vod_id}. Call fetch_vod first."}
+
+    scores = d / "viral_score.csv"
+    if not scores.exists():
+        scored = tool_get_virality(vod_id, top=max(int(from_top), 15))
+        if "error" in scored:
+            return scored
+    if not scores.exists():
+        return {"error": f"No viral_score.csv found for VOD {vod_id}."}
+
+    video = _video_source_for(str(vod_id))
+
+    try:
+        from export_top_clips import export_top_clips
+        args = argparse.Namespace(
+            scores=scores,
+            chat=cp,
+            video=video,
+            top=int(top),
+            from_top=int(from_top),
+            pad=int(pad),
+            out=str(VOD_CLIPS_DIR),
+            fast=bool(fast),
+            dry_run=False,
+            min_score=0,
+            thumbnail=bool(thumbnail),
+            polish=False,
+            intro_zoom=False,
+            intro_zoom_duration=2.5,
+            intro_start_zoom=1.12,
+            fade_duration=0.75,
+            shock_cam=False,
+            shock_cam_duration=2.0,
+            shock_cam_scale=1.35,
+            shock_cam_before_peak=0.5,
+            shock_cam_min_mood="SHOCK",
+        )
+        result = export_top_clips(args)
+    except Exception as e:
+        return {"error": f"clip export failed: {type(e).__name__}: {e}"}
+
+    exported = []
+    for clip in result.get("clips", []):
+        meta = clip.get("metadata", {})
+        exported.append({
+            "filename": clip.get("filename"),
+            "metadata_path": clip.get("metadata_path"),
+            "thumbnail": clip.get("thumbnail"),
+            "title": meta.get("title"),
+            "description": meta.get("description"),
+            "start": meta.get("start_timestamp"),
+            "end": meta.get("end_timestamp"),
+            "score": meta.get("virality"),
+        })
+    return {
+        "vod_id": vod_id,
+        "source_video": video,
+        "output_dir": result.get("output_dir"),
+        "clips": exported,
+    }
+
+
 SYSTEM_PROMPT = """You are Symbiote — the intelligence inside the Parasite toolkit. Parasite latches onto Twitch VODs and drains chat. You are its mind: an efficient, slightly dark content manager. Think Scooter Braun meets Dracula. You identify what people will click, what they will share, where the engagement bleeds hottest. You don't do small talk.
 
 You have tools to fetch chat, score clips, analyze windows, and search for patterns. USE THEM. Never fabricate timestamps, message counts, or chat content — if you don't have the data, call a tool.
@@ -662,6 +745,7 @@ Workflow:
 - "what's going on at X" → analyze_window. Accepts '2:57', '2:57:00', or raw seconds.
 - "when did people say Y" / "heatmap of Z" → search_chat with a regex.
 - "show me the heatmap" → open_heatmap.
+- "export clips" / "make the mp4s" → export_top_clips after get_virality if needed.
 - Unknown VOD? Call list_vods, then ask which one.
 
 When the user asks what was happening at a peak, give clip-ready output: what was on screen (inferred from chat), the cold-open line, and the exact cut window. The cut is everything."""
@@ -714,6 +798,22 @@ TOOLS = [
         },
     },
     {
+        "name": "export_top_clips",
+        "description": "Cut the top Siphon moments into MP4 clips and write upload metadata/copy to ~/Desktop/VODClips. Prefers local video files in ~/Desktop/VODs and falls back to the Twitch VOD URL.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "vod_id": {"type": "string", "description": "VOD numeric ID"},
+                "top": {"type": "integer", "description": "Number of clips to export", "default": 5},
+                "from_top": {"type": "integer", "description": "Pool size from viral_score.csv", "default": 15},
+                "pad": {"type": "integer", "description": "Seconds before/after peak", "default": 10},
+                "fast": {"type": "boolean", "description": "Use ffmpeg stream copy", "default": False},
+                "thumbnail": {"type": "boolean", "description": "Export JPG thumbnails", "default": True},
+            },
+            "required": ["vod_id"],
+        },
+    },
+    {
         "name": "analyze_window",
         "description": "Get chat signal for a specific timestamp — top tokens/emotes and sample messages. Use this to figure out what was happening at a peak or any moment the user asks about.",
         "parameters": {
@@ -760,6 +860,7 @@ TOOL_FUNCS = {
     "list_vods":     tool_list_vods,
     "get_peaks":     tool_get_peaks,
     "get_virality":  tool_get_virality,
+    "export_top_clips": tool_export_top_clips,
     "analyze_window": tool_analyze_window,
     "search_chat":   tool_search_chat,
     "open_heatmap":  tool_open_heatmap,
@@ -781,73 +882,88 @@ def run_tool(name, args):
         return {"error": f"{type(e).__name__}: {e}"}
 
 
-def _gemini_tools():
-    """Wrap our TOOLS list in a Gemini Tool object."""
-    return [types.Tool(function_declarations=TOOLS)]
+class LLMRouter:
+    def __init__(self, args):
+        self.primary_provider = _resolve_provider(args.provider)
+        self.fallback_provider = "none" if args.no_fallback else args.fallback_provider
+        if self.primary_provider != "gemini":
+            self.fallback_provider = "none"
+        self.primary_model = _resolve_cli_model(self.primary_provider, args.model, args.pro)
+        self.fallback_model = (
+            resolve_model(self.fallback_provider, args.fallback_model)
+            if self.fallback_provider != "none" else None
+        )
+        self.cooldowns: dict[str, float] = {}
+        self.clients = {}
 
+    def _client(self, provider: str, model: str):
+        key = (provider, model)
+        if key in self.clients:
+            return self.clients[key]
+        if provider == "gemini":
+            client = GeminiLLMClient(model=model, system_prompt=SYSTEM_PROMPT)
+        elif provider == "groq":
+            client = GroqLLMClient(model=model, system_prompt=SYSTEM_PROMPT)
+        else:
+            raise ProviderConfigError(f"Unknown provider {provider!r}")
+        self.clients[key] = client
+        return client
 
-def _to_jsonable(v):
-    """Normalize google proto MapComposite / ListComposite to plain Python."""
-    if hasattr(v, "items"):
-        return {k: _to_jsonable(vv) for k, vv in v.items()}
-    if isinstance(v, (list, tuple)) or (hasattr(v, "__iter__") and not isinstance(v, (str, bytes))):
+    def _primary_ready(self) -> bool:
+        return time.time() >= self.cooldowns.get(self.primary_provider, 0)
+
+    def active_provider(self) -> tuple[str, str, str | None]:
+        if self.primary_provider == "gemini" and not self._primary_ready() and self.fallback_provider != "none":
+            return self.fallback_provider, self.fallback_model, "cooldown"
+        return self.primary_provider, self.primary_model, None
+
+    def run_turn(self, messages, tools, on_token):
+        provider, model, reason = self.active_provider()
+        if reason == "cooldown":
+            on_token(f"[Using Groq while Gemini cooldown is active]\n")
         try:
-            return [_to_jsonable(x) for x in v]
-        except TypeError:
-            pass
-    return v
+            return self._client(provider, model).run_turn(messages, tools), provider, model
+        except ProviderQuotaError as e:
+            if provider != "gemini" or self.fallback_provider == "none":
+                raise
+            retry_after = e.retry_after or 60
+            self.cooldowns["gemini"] = time.time() + retry_after
+            fb_provider, fb_model = self.fallback_provider, self.fallback_model
+            if fb_provider == "none":
+                raise
+            on_token(f"[Gemini quota hit — switching to Groq: {fb_model}]\n")
+            try:
+                return self._client(fb_provider, fb_model).run_turn(messages, tools), fb_provider, fb_model
+            except ProviderConfigError as cfg:
+                raise ProviderConfigError(
+                    "Gemini quota was hit, but GROQ_API_KEY is not set. "
+                    "Add it to .env or environment."
+                ) from cfg
 
 
-def _retry_delay_from(err):
-    """Parse Gemini 429's retryDelay field ('15s') -> seconds. Fallback 30s."""
-    msg = str(err)
-    m = re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s", msg)
-    if m:
-        return min(60.0, float(m.group(1)) + 1.0)
-    return 30.0
+def _resolve_provider(provider: str | None) -> str:
+    provider = (provider or os.environ.get("SYMBIOTE_PRIMARY_PROVIDER") or "gemini").lower()
+    if provider == "auto":
+        provider = os.environ.get("SYMBIOTE_PRIMARY_PROVIDER", "gemini").lower()
+        if provider == "auto":
+            provider = "gemini"
+    if provider not in ("gemini", "groq"):
+        raise ProviderConfigError(f"Unsupported provider {provider!r}")
+    return provider
 
 
-_DAILY_QUOTA_MARKERS = ("PerDay", "free_tier_requests", "FreeTier")
+def _resolve_cli_model(provider: str, model: str | None, pro: bool) -> str:
+    if model:
+        return resolve_model(provider, model)
+    env_key = f"SYMBIOTE_{provider.upper()}_MODEL"
+    if os.environ.get(env_key):
+        return os.environ[env_key]
+    if provider == "gemini" and pro:
+        return resolve_model(provider, "pro")
+    return resolve_model(provider, "fast")
 
 
-def _is_daily_quota_error(err):
-    s = str(err)
-    return any(m in s for m in _DAILY_QUOTA_MARKERS)
-
-
-def _open_stream(client, model, contents, config, on_token):
-    """generate_content_stream with polite retry on 429 rate-limit."""
-    for attempt in range(3):
-        try:
-            return client.models.generate_content_stream(
-                model=model, contents=contents, config=config,
-            )
-        except Exception as e:
-            s = str(e)
-            if "429" in s or "RESOURCE_EXHAUSTED" in s:
-                if _is_daily_quota_error(e):
-                    raise DailyQuotaExhausted() from e
-                delay = _retry_delay_from(e)
-                on_token(f"\n  [rate-limited — waiting {delay:.0f}s then retrying]\n")
-                time.sleep(delay)
-                continue
-            raise
-    raise RuntimeError("Exhausted retries on rate-limit")
-
-
-def chat_turn(client, model, contents, on_token, spinner=None):
-    """Stream one turn against Gemini, execute any function calls, loop until done.
-
-    If `spinner` is provided, it's started while waiting for the first token of
-    each stream and while a tool is executing, and stopped as soon as output
-    begins flowing.
-    """
-    config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
-        tools=_gemini_tools(),
-        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-    )
-
+def chat_turn(router: LLMRouter, messages: list[dict], on_token, spinner=None):
     def _spin_start(label):
         if spinner is not None:
             spinner.start(label)
@@ -857,61 +973,44 @@ def chat_turn(client, model, contents, on_token, spinner=None):
             spinner.stop()
 
     while True:
-        text_agg = ""
-        fn_calls = []
         _spin_start("thinking…")
-        stream = _open_stream(client, model, contents, config, on_token)
-        first_token = True
-        for chunk in stream:
-            cand_list = getattr(chunk, "candidates", None) or []
-            for cand in cand_list:
-                parts = getattr(getattr(cand, "content", None), "parts", None) or []
-                for part in parts:
-                    txt = getattr(part, "text", None)
-                    if txt:
-                        if first_token:
-                            _spin_stop()
-                            first_token = False
-                        on_token(txt)
-                        text_agg += txt
-                    fc = getattr(part, "function_call", None)
-                    if fc and getattr(fc, "name", None):
-                        fn_calls.append(fc)
-        _spin_stop()
+        try:
+            result, provider, model = router.run_turn(messages, TOOLS, on_token)
+        finally:
+            _spin_stop()
 
-        # Model's turn goes into history.
-        model_parts = []
-        if text_agg:
-            model_parts.append(types.Part(text=text_agg))
-        for fc in fn_calls:
-            model_parts.append(types.Part(function_call=fc))
-        if model_parts:
-            contents.append(types.Content(role="model", parts=model_parts))
+        text = result.get("text") or ""
+        tool_calls = result.get("tool_calls") or []
+        if text:
+            on_token(text)
+        messages.append({"role": "assistant", "content": text, "tool_calls": tool_calls})
 
-        if not fn_calls:
+        if not tool_calls:
             return
 
-        # Execute tools, feed results back as a "user"-role turn of function_response parts.
-        result_parts = []
-        for fc in fn_calls:
-            args = _to_jsonable(getattr(fc, "args", {}) or {})
+        for call in tool_calls:
+            name = call["name"]
+            args = call.get("arguments") or {}
             preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:2])
-            on_token(f"\n  · {fc.name}({preview})")
-            _spin_start(f"{fc.name}…")
-            result = run_tool(fc.name, args)
+            on_token(f"\n  · {name}({preview})")
+            _spin_start(f"{name}…")
+            tool_result = run_tool(name, args)
             _spin_stop()
-            result_parts.append(types.Part.from_function_response(
-                name=fc.name,
-                response={"result": result},
-            ))
+            messages.append({
+                "role": "tool",
+                "name": name,
+                "tool_call_id": call.get("id"),
+                "content": json.dumps({"result": tool_result}, ensure_ascii=False, default=str),
+            })
         on_token("\n")
-        contents.append(types.Content(role="user", parts=result_parts))
 
 
 def _print_tool_result(result: dict) -> None:
     """Compact pretty-print for manual-mode tool output."""
     if "error" in result:
         print(f"  [error] {result['error']}")
+        if result.get("path"):
+            print(f"  path -> {result['path']}")
         return
     # Special-case common result shapes for readability
     if "vods" in result:
@@ -927,17 +1026,27 @@ def _print_tool_result(result: dict) -> None:
                   f"{msgs:,} msgs  {h}h{m:02d}m")
         return
     if "peaks" in result:
+        if "total_matches" in result:
+            print(f"  {result['total_matches']:,} matches")
         for p in result["peaks"]:
             seg = f"  {p.get('segment','')}" if p.get("segment") else ""
-            print(f"  #{p['rank']:2}  {p['timestamp']}  {p['count']:4} msgs{seg}")
+            rank = p.get("rank")
+            prefix = f"#{rank:2}" if rank is not None else "   "
+            print(f"  {prefix}  {p['timestamp']}  {p['count']:4} msgs{seg}")
         return
     if "clips" in result:
         for c in result["clips"]:
-            print(f"  #{c['rank']:2}  {c['virality']:3}/100  {c['cut_window']}  "
-                  f"{c['mood']:<7}  {c['echo_label']:<12}  {c['reasoning']}")
+            if "rank" in c:
+                print(f"  #{c['rank']:2}  {c['virality']:3}/100  {c['cut_window']}  "
+                      f"{c['mood']:<7}  {c['echo_label']:<12}  {c['reasoning']}")
+            else:
+                print(f"  {c.get('filename')}  {c.get('start')} - {c.get('end')}  "
+                      f"{c.get('score')}/100  {c.get('title')}")
         art = result.get("artifacts", {})
         if art.get("siphon_report_md"):
             print(f"  report → {art['siphon_report_md']}")
+        if result.get("output_dir"):
+            print(f"  output -> {result['output_dir']}")
         return
     if "tokens" in result:
         top = result["tokens"][:15]
@@ -947,10 +1056,115 @@ def _print_tool_result(result: dict) -> None:
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
 
 
-def manual_repl() -> None:
+_MANUAL_MENU = [
+    ("list", "show archived VODs"),
+    ("fetch", "download/cache a VOD"),
+    ("peaks", "raw peak density"),
+    ("score", "Siphon virality scoring"),
+    ("export", "cut top clips"),
+    ("window", "analyze timestamp window"),
+    ("search", "regex search"),
+    ("heatmap", "open heatmap PNG"),
+    ("agent", "summon Symbot"),
+    ("help", "show commands"),
+    ("quit", "leave"),
+]
+
+
+def _menu_command_line(cmd: str) -> str:
+    if cmd in ("list", "agent", "help", "quit"):
+        return cmd
+    if cmd == "fetch":
+        vod = input("vod url/id: ").strip()
+        no_video = input("no-video? [y/N] ").strip().lower()
+        return f"fetch {vod}" + (" no-video" if no_video in ("y", "yes") else "")
+    if cmd in ("peaks", "score", "export", "heatmap"):
+        vod = input("vod id: ").strip()
+        top = ""
+        if cmd in ("peaks", "score", "export"):
+            top = input("top [Enter for default]: ").strip()
+        return f"{cmd} {vod}" + (f" {top}" if top else "")
+    if cmd == "window":
+        vod = input("vod id: ").strip()
+        start = input("start timestamp: ").strip()
+        dur = input("duration seconds [Enter for default]: ").strip()
+        return f"window {vod} {start}" + (f" {dur}" if dur else "")
+    if cmd == "search":
+        vod = input("vod id: ").strip()
+        pattern = input("pattern: ").strip()
+        return f"search {vod} {pattern}"
+    return cmd
+
+
+def _arrow_menu() -> str | None:
+    if not sys.stdin.isatty():
+        return None
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+
+    idx = 0
+    print("\nUse ↑/↓, Enter to select, Esc to cancel.")
+    while True:
+        for i, (cmd, desc) in enumerate(_MANUAL_MENU):
+            marker = ">" if i == idx else " "
+            print(f"\r\033[K{marker} {cmd:<8} {desc}")
+        print(f"\033[{len(_MANUAL_MENU)}A", end="", flush=True)
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):
+            key = msvcrt.getwch()
+            if key == "H":
+                idx = (idx - 1) % len(_MANUAL_MENU)
+            elif key == "P":
+                idx = (idx + 1) % len(_MANUAL_MENU)
+            continue
+        if ch == "\r":
+            print(f"\033[{len(_MANUAL_MENU)}B", end="")
+            return _menu_command_line(_MANUAL_MENU[idx][0])
+        if ch == "\x1b":
+            print(f"\033[{len(_MANUAL_MENU)}B", end="")
+            return ""
+
+
+def _manual_input(prompt: str) -> str:
+    if not sys.stdin.isatty():
+        return input(prompt)
+    try:
+        import msvcrt
+    except ImportError:
+        return input(prompt)
+
+    buf: list[str] = []
+    print(prompt, end="", flush=True)
+    while True:
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):
+            key = msvcrt.getwch()
+            if not buf and key in ("H", "P"):
+                line = _arrow_menu()
+                print(prompt + line)
+                return line or ""
+            continue
+        if ch == "\r":
+            print()
+            return "".join(buf)
+        if ch == "\x03":
+            raise KeyboardInterrupt
+        if ch == "\b":
+            if buf:
+                buf.pop()
+                print("\b \b", end="", flush=True)
+            continue
+        if ch >= " ":
+            buf.append(ch)
+            print(ch, end="", flush=True)
+
+
+def manual_repl(args=None) -> None:
     """
     No-AI fallback REPL. Dispatches typed commands directly to TOOL_FUNCS.
-    Entered on --manual flag, missing GEMINI_API_KEY, or daily quota exhaustion.
+    Default mode. Can summon the AI agent explicitly with `agent` / `symbot`.
     """
     print("~~ Symbiote MANUAL MODE — direct tool dispatch, no AI ~~")
     print("Commands:")
@@ -958,15 +1172,17 @@ def manual_repl() -> None:
     print("  list                         show archived VODs")
     print("  peaks <id> [top=15]          raw peak density")
     print("  score <id> [top=15]          Siphon virality scoring")
+    print("  export <id> [top=5]          cut top clips to Desktop/VODClips")
     print("  window <id> <start> [dur=60] analyze a timestamp window")
     print("  search <id> <pattern>        regex search chat")
     print("  heatmap <id>                 open heatmap PNG")
-    print("  help   quit")
+    print("  agent                         summon Symbot")
+    print("  help   quit                   press ↑/↓ for menu")
     print()
 
     while True:
         try:
-            line = input("manual> ").strip()
+            line = _manual_input("manual> ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nbye.")
             return
@@ -982,8 +1198,13 @@ def manual_repl() -> None:
             return
         elif cmd == "help":
             print("  fetch <url|id> [no-video]  |  list  |  peaks <id> [top]")
-            print("  score <id> [top]           |  window <id> <start> [dur]")
-            print("  search <id> <pattern>      |  heatmap <id>  |  quit")
+            print("  score <id> [top]           |  export <id> [top]")
+            print("  window <id> <start> [dur]  |  search <id> <pattern>")
+            print("  heatmap <id>")
+            print("  agent                      |  quit")
+        elif cmd in ("agent", "symbot", "summon"):
+            _agent_repl(args)
+            return
         elif cmd == "fetch":
             argv = rest.split()
             if not argv:
@@ -1013,6 +1234,15 @@ def manual_repl() -> None:
             if len(argv) > 1 and argv[1].isdigit():
                 kwargs["top"] = int(argv[1])
             _print_tool_result(run_tool("get_virality", kwargs))
+        elif cmd == "export":
+            argv = rest.split()
+            if not argv:
+                print("  usage: export <vod_id> [top]")
+                continue
+            kwargs = {"vod_id": argv[0]}
+            if len(argv) > 1 and argv[1].isdigit():
+                kwargs["top"] = int(argv[1])
+            _print_tool_result(run_tool("export_top_clips", kwargs))
         elif cmd == "window":
             argv = rest.split()
             if len(argv) < 2:
@@ -1038,37 +1268,21 @@ def manual_repl() -> None:
             print(f"  Unknown command {cmd!r}. Type 'help'.")
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Symbiote — Twitch VOD chat agent (Parasite toolkit)")
-    ap.add_argument("--pro",    action="store_true",
-                    help="Use Gemini 2.5 Pro (stronger; smaller free quota)")
-    ap.add_argument("--model",  help="Override Gemini model name")
-    ap.add_argument("--manual", action="store_true",
-                    help="Skip AI — use direct tool commands only (manual mode)")
-    args = ap.parse_args()
-
-    # --manual flag: bypass AI entirely
-    if args.manual:
-        manual_repl()
-        return
-
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        print("No GEMINI_API_KEY found — Symbiote is entering manual mode.")
-        print("(Set GEMINI_API_KEY in .env or your shell to enable AI mode)")
-        print("  .env file:   GEMINI_API_KEY=AIza...")
-        print("  PowerShell:  setx GEMINI_API_KEY \"AIza...\"  (close + reopen terminal)")
-        print("  bash:        export GEMINI_API_KEY='AIza...'")
+def _agent_repl(args) -> None:
+    try:
+        router = LLMRouter(args)
+    except ProviderConfigError as e:
+        print(f"{e} — staying in manual mode.")
+        print("(Set GEMINI_API_KEY and/or GROQ_API_KEY in .env or your shell)")
         print()
-        manual_repl()
+        manual_repl(args)
         return
 
-    model = args.model or ("gemini-2.5-pro" if args.pro else "gemini-2.5-flash")
-    client = genai.Client(api_key=api_key)
-    contents = []
+    messages = []
     spinner = WormSpinner()
 
-    print(f"~~ Symbiote bonded. model={model} ~~")
+    fallback = f", fallback={router.fallback_provider}:{router.fallback_model}" if router.fallback_provider != "none" else ", fallback=none"
+    print(f"~~ Symbot summoned. primary={router.primary_provider}:{router.primary_model}{fallback} ~~")
     print("drop a VOD link, ask about one I already have, or 'exit' to leave.\n")
 
     while True:
@@ -1083,34 +1297,60 @@ def main():
             print("bye.")
             return
 
-        contents.append(types.Content(role="user",
-                                       parts=[types.Part(text=user_input)]))
-        print("symbiote> ", end="", flush=True)
+        messages.append({"role": "user", "content": user_input})
+        print("symbot> ", end="", flush=True)
         try:
-            chat_turn(client, model, contents,
+            chat_turn(router, messages,
                       on_token=lambda t: print(t, end="", flush=True),
                       spinner=spinner)
-        except DailyQuotaExhausted:
+        except ProviderQuotaError as e:
             spinner.stop()
-            B, H, D, R = WormSpinner.BODY, WormSpinner.HEAD, WormSpinner.DIM, WormSpinner.RESET
-            print(f"\n  {B}~∿⁓∿~⁓{H}◉{R} quota exhausted — the worm is dry for today.")
-            print(f"  {D}· free tier caps at ~20 requests/day on gemini-2.5-flash.{R}")
-            print(f"  {D}· try again tomorrow, or grab a paid key at https://aistudio.google.com{R}")
-            try:
-                ans = input(f"\n  switch to manual mode? [Y/n] ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                ans = "n"
-            if ans not in ("n", "no"):
-                print()
-                manual_repl()
-            else:
-                print("bye.")
-            return
+            print(f"\n[quota/rate-limit: {e}]")
         except Exception as e:
             print(f"\n[API error: {type(e).__name__}: {e}]")
         except KeyboardInterrupt:
             print("\n[interrupted]")
         print()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Symbiote — Twitch VOD chat agent (Parasite toolkit)")
+    ap.add_argument("--pro",    action="store_true",
+                    help="Use Gemini 2.5 Pro (stronger; smaller free quota)")
+    ap.add_argument("--provider", choices=("gemini", "groq", "auto"),
+                    default=os.environ.get("SYMBIOTE_PRIMARY_PROVIDER", "gemini"),
+                    help="LLM provider for Symbot (default: gemini)")
+    ap.add_argument("--fallback-provider", choices=("groq", "none"),
+                    default=os.environ.get("SYMBIOTE_FALLBACK_PROVIDER", "groq"),
+                    help="Fallback provider after Gemini quota/rate-limit (default: groq)")
+    ap.add_argument("--model",  help="Primary model name or preset")
+    ap.add_argument("--fallback-model",
+                    default=os.environ.get("SYMBIOTE_GROQ_MODEL", "llama-3.3-70b-versatile"),
+                    help="Fallback model name or preset")
+    ap.add_argument("--no-fallback", action="store_true",
+                    help="Disable automatic provider fallback")
+    ap.add_argument("--manual", action="store_true",
+                    help="Skip AI — use direct tool commands only (manual mode)")
+    ap.add_argument("--agent", action="store_true",
+                    help="Start Symbot immediately instead of manual mode")
+    args = ap.parse_args()
+
+    if args.agent and not args.manual:
+        _agent_repl(args)
+        return
+
+    if not args.manual and sys.stdin.isatty():
+        try:
+            ans = input("Summon agent Symbot? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            ans = ""
+        if ans in ("y", "yes"):
+            print()
+            _agent_repl(args)
+            return
+        print()
+
+    manual_repl(args)
 
 
 if __name__ == "__main__":

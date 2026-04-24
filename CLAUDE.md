@@ -60,12 +60,15 @@ Optional `--info <yt-dlp .info.json>` reads the `chapters` array and:
 ```bash
 pip install -r requirements.txt
 
-# The agent (recommended — orchestrates fetch + analysis from natural language)
+# Symbiote starts in manual mode by default; summon Symbot for the Gemini agent.
 # Get a free key at https://aistudio.google.com/app/apikey
 setx GEMINI_API_KEY "AIza..."           # PowerShell, close + reopen terminal
-python symbiote.py
-python symbiote.py --pro                # Gemini 2.5 Pro for deeper analysis
-python symbiote.py --manual             # Manual mode — no AI required
+python symbiote.py                      # asks "Summon agent Symbot? [y/N]"
+python symbiote.py --agent --provider auto
+python symbiote.py --agent --provider groq --model fast
+python symbiote.py --agent --provider gemini --fallback-provider groq
+python symbiote.py --pro --agent        # Gemini 2.5 Pro for deeper analysis
+python symbiote.py --manual             # Manual mode, no prompt
 
 # Raw scripts (fallback / CI / power-user path)
 python fetch_chat.py https://www.twitch.tv/videos/<id> --max-seconds 23766
@@ -73,9 +76,13 @@ python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 15
 python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
 python viral_score.py archive/<dir>/chat.json --peaks archive/<dir>/peaks.csv \
     --info archive/<dir>/info.json
+python export_top_clips.py archive/<dir>/viral_score.csv \
+    --chat archive/<dir>/chat.json --video path/to/vod.mp4 --dry-run
 ```
 
 **Why Gemini:** the project ships to users, and Gemini 2.5 Flash has a free tier — no payment method required. Anthropic's API is pay-as-you-go.
+
+**Provider fallback:** Gemini remains primary by default. If Gemini returns quota/rate-limit exhaustion (`429`, `RESOURCE_EXHAUSTED`, quota, rate limit, `retryDelay`), Symbot marks Gemini on cooldown and retries the same user turn on Groq when `GROQ_API_KEY` is set. `--provider groq --model fast` uses Groq directly. `--no-fallback` disables automatic fallback.
 
 **Free-tier limits (verified live 2026-04-23):** Gemini 2.5 Flash free tier is **5 RPM** per project (error: `generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5`) plus a daily cap. A single Symbiote turn often fires 2 API calls (tool dispatch + result synthesis), so a heavy conversation hits this quickly. `chat_turn` catches 429s, parses the `retryDelay` field from the error, sleeps that long, and retries up to 3 times (`_open_stream` / `_retry_delay_from`). Users see a `[rate-limited — waiting Ns then retrying]` inline while it waits.
 
@@ -115,6 +122,7 @@ Seven tools exposed to Gemini via function-declarations in `symbiote.py`:
 | `list_vods` | Walk `archive/` and return all known VODs with metadata. Also picks up legacy flat-layout chats. |
 | `get_peaks` | Bin chat into buckets, return top-N peaks with HH:MM:SS + chapter label. Raw density only — no scoring. |
 | `get_virality` | **Siphon engine.** Score peaks 0–100, smart-pad cut windows, classify mood, return reasoning. Use this for clip decisions. Writes `viral_score.csv` + `siphon_report.md`. |
+| `export_top_clips` | Cut the best Siphon moments to MP4, write JSON sidecars, upload copy, manifest, and optional thumbnails in `~/Desktop/VODClips`. Prefers local files in `~/Desktop/VODs`, falls back to Twitch VOD URL. |
 | `analyze_window` | Given a timestamp + duration, return top tokens and sampled messages. Accepts `H:MM:SS`, `H:MM`, or raw seconds. |
 | `search_chat` | Regex-search the chat. Returns total matches + density peaks. |
 | `open_heatmap` | `os.startfile` the VOD's heatmap.png (regenerates via `heatmap.py` if missing). |
@@ -150,6 +158,8 @@ Baseline guard: `max(mean(m-5..m-1), 0.3 × global_median)`. First 5 minutes ski
 
 **Mood lexicon** (`MOOD_LEXICON` in `viral_score.py`): whitespace-split uppercase matching — captures short tokens (`W`, `L`, `+2`) that the `tokens_in` regex would miss.
 
+**Break markers:** `ASSEMBLE` means bathroom/break start, and `SCATTER` means return from break. They are not hype/shock signals. Siphon removes windows with either marker from scoring/export consideration.
+
 **Outputs:** `viral_score.csv` (reasoning column per clip) + `siphon_report.md` (pillar breakdown + mood tokens + sample messages per clip). Both land in the VOD's archive directory.
 
 **Public API for `symbiote.py`:**
@@ -158,12 +168,15 @@ Baseline guard: `max(mean(m-5..m-1), 0.3 × global_median)`. First 5 minutes ski
 
 ## Manual Mode
 
-When Gemini is unavailable (no API key, quota exhausted, offline), Symbiote falls back to a direct tool REPL — no AI in the loop.
+Symbiote starts as a direct tool REPL by default — no AI in the loop. Type `agent`
+inside manual mode, answer `y` to the startup prompt, or pass `--agent` to summon
+Symbot, the Gemini-backed conversational agent.
 
 **Triggers:**
+- `python symbiote.py` — default startup asks whether to summon Symbot; Enter means manual
 - `python symbiote.py --manual` — explicit flag
-- `GEMINI_API_KEY` missing → auto-enter on startup
-- `DailyQuotaExhausted` mid-session → prompt to switch
+- `GEMINI_API_KEY` missing while summoning Symbot → stay in manual mode
+- `DailyQuotaExhausted` mid-session → prompt to switch back to manual mode
 
 **Commands in manual mode:**
 ```
@@ -171,19 +184,26 @@ fetch <url|id> [no-video]   — download chat (+ video unless 'no-video')
 list                         — show archived VODs
 peaks <id> [top=15]          — raw peak density table
 score <id> [top=15]          — Siphon virality scoring
+export <id> [top=5]          — cut top clips to Desktop/VODClips
 window <id> <start> [dur=60] — analyze a timestamp window
 search <id> <pattern>        — regex search chat
 heatmap <id>                 — open heatmap PNG
+agent                        — summon Symbot (Gemini)
 help  |  quit
 ```
+
+Press Up/Down at an empty `manual>` prompt to use the selectable command menu.
 
 ## VOD Video Files
 
 `fetch_vod` (tool) and `fetch` (manual mode command) both download the VOD video via yt-dlp in addition to chat.
 
-**Destination — resolved in order:**
+**VOD source directory — resolved in order:**
 1. `VODS_DIR` environment variable if set
 2. `~/Desktop/VODs` (resolves to `C:\Users\DARKLXRD\Desktop\VODs` on Windows)
+
+Clip export output defaults to `~/Desktop/VODClips` (override with `VOD_CLIPS_DIR`).
+If no local video exists for a VOD, export falls back to `https://www.twitch.tv/videos/<vod_id>` as the ffmpeg input.
 
 Directory is created automatically. Filename template: `<streamer>_<upload_date>_v<vod_id>.<ext>`.
 
@@ -202,5 +222,5 @@ export VODS_DIR=/mnt/storage/vods
 - Each script is single-file. No premature module split.
 - stdlib + `matplotlib` + `requests` + `google-genai` only. Don't add pandas/numpy — `collections.Counter` is enough for binning.
 - Model choice: Gemini 2.5 Flash default (free, fast), Gemini 2.5 Pro behind `--pro` for deeper analysis at the cost of a tighter quota. `--model` accepts an arbitrary override if/when Google ships a better flash-tier model.
-- **Live-tested 2026-04-23** — three-turn scripted conversation (list_vods → get_peaks → analyze_window) dispatched all tools correctly on the zackrawrr VOD and produced the same "Cinema ×63, SCATTER, ASSEMBLE, SAME SHIRT" synthesis as the manual analysis. Interpretive quality on clip-ready output is strong at `gemini-2.5-flash`; no need to default to `--pro`.
+- **Live-tested 2026-04-23** — three-turn scripted conversation (list_vods → get_peaks → analyze_window) dispatched all tools correctly on the zackrawrr VOD. `SCATTER`/`ASSEMBLE` are now treated as break markers, not clip signals. Interpretive quality on clip-ready output is strong at `gemini-2.5-flash`; no need to default to `--pro`.
 - No sentiment/LLM-classification layer yet. If added later, put it in a separate module that consumes the `peaks.csv` from an archive dir — keep the core pipeline fast and offline.

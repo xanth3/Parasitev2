@@ -9,23 +9,30 @@ highest-engagement minutes so you can cut clips without rewatching.
 
 ## Symbiote CLI (recommended)
 
-Natural-language interface — drop a VOD link, ask questions, get clip-ready
-answers. Powered by Gemini (free tier).
+Manual tool REPL by default, with an optional Gemini-powered agent named
+Symbot when you want natural-language orchestration. In manual mode, press
+Up/Down at an empty prompt to open the selectable command menu.
 
 ```bash
 pip install -r requirements.txt
 
 # Get a free key at https://aistudio.google.com/app/apikey
+# Optional Groq fallback key: https://console.groq.com/keys
 # Easiest: create a .env file next to symbiote.py
 cp .env.example .env
-# edit .env and paste your key
+# edit .env and paste your keys
 
-python symbiote.py                    # defaults to Gemini 2.5 Flash
-python symbiote.py --pro              # Gemini 2.5 Pro (smaller free quota)
+python symbiote.py                    # manual mode by default
+python symbiote.py --agent --provider auto
+python symbiote.py --pro --agent      # Symbot with Gemini 2.5 Pro
+python symbiote.py --agent --provider groq --model fast
+python symbiote.py --agent --provider gemini --fallback-provider groq
 ```
 
-The key can also be set as a system env var (`setx GEMINI_API_KEY "AIza..."` on
-Windows, `export GEMINI_API_KEY='AIza...'` on bash) — that always wins over `.env`.
+When run interactively, `python symbiote.py` asks `Summon agent Symbot? [y/N]`.
+Answer `n` or press Enter for manual mode. The key can also be set as a system
+env var (`setx GEMINI_API_KEY "AIza..."` on Windows, `export GEMINI_API_KEY='AIza...'`
+on bash) — that always wins over `.env`.
 
 ### One-word command
 
@@ -37,7 +44,8 @@ $p = "C:\Users\DARKLXRD\Desktop\Parasitev2"   # adjust to your clone path
 [Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";$p", "User")
 # close + reopen terminal, then:
 symbiote
-symbiote --pro
+symbiote --agent
+symbiote --pro --agent
 ```
 
 **macOS / Linux (once):**
@@ -47,7 +55,8 @@ chmod +x /path/to/Parasitev2/symbiote
 source ~/.bashrc
 # then:
 symbiote
-symbiote --pro
+symbiote --agent
+symbiote --pro --agent
 ```
 
 Example session:
@@ -94,8 +103,38 @@ python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 15
 
 # 3. per-peak chat detail for clip planning
 python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
+
+# 4. export the top Siphon clips
+python export_top_clips.py archive/<dir>/viral_score.csv \
+  --chat archive/<dir>/chat.json \
+  --video ~/Desktop/VODs/<vod>.mp4 \
+  --top 5 --from-top 15 --pad 10
+
+# polished exports: fade-out, optional intro zoom, SHOCK punch-in
+python export_top_clips.py archive/<dir>/viral_score.csv \
+  --chat archive/<dir>/chat.json \
+  --video path/to/vod.mp4 \
+  --top 5 --pad 10 \
+  --polish --intro-zoom --shock-cam --thumbnail
 ```
 
-Outputs: `heatmap.png`, `peaks.csv`, `peaks_detail.md`.
+Outputs: `heatmap.png`, `peaks.csv`, `peaks_detail.md`, plus clip exports in
+`~/Desktop/VODClips`.
+
+Clip export looks for local VOD files in `~/Desktop/VODs` first. If no local
+file is available, it falls back to `https://www.twitch.tv/videos/<VOD ID>` as
+the ffmpeg input. Set `VODS_DIR` or `VOD_CLIPS_DIR` to override those folders.
+
+Polished exports use ffmpeg filters and force re-encode. `--polish` adds video
+and audio fade-out, `--intro-zoom` adds a slow opening zoom-out, and
+`--shock-cam` punches in on SHOCK windows. Face targeting uses OpenCV Haar
+cascade detection first; if no face is found, it falls back to a center crop.
+
+Gemini remains the default Symbot provider. If Gemini hits quota/rate-limit
+exhaustion, Symbot automatically falls back to Groq for the current turn when
+`GROQ_API_KEY` is set. Use `--no-fallback` to disable that behavior.
+
+Siphon treats `ASSEMBLE` and `SCATTER` as break/bathroom markers, not hype.
+Those windows are removed from scored/exported clip consideration.
 
 See [CLAUDE.md](CLAUDE.md) for architecture notes and Twitch API constraints.

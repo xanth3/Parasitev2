@@ -51,14 +51,16 @@ from peaks_detail import load_peaks
 
 MOOD_LEXICON = {
     "HYPE":  {"POG", "POGGERS", "POGCHAMP", "HYPE", "LETSGO", "LETSGOO", "GIGACHAD",
-              "CLEAN", "INSANE", "W", "WW", "+2", "LFG", "GG", "GOAT", "MENACE",
-              "BASED", "ACTUAL"},
+              "CLEAN", "INSANE", "W", "WW", "+2", "GG", "GOAT", "MENACE",
+              "BASED", "ACTUAL", "CINEMA", "PAGMAN", "AURA", "BIG"},
     "FUNNY": {"LUL", "LULW", "OMEGALUL", "KEKW", "LMAO", "ICANT", "XD", "DEAD",
-              "JOEL", "CLUELESS", "OMEGADANCE", "HAHA", "LMFAO"},
+               "CLUELESS", "OMEGADANCE", "HAHA", "LMFAO", "BALD", "SAMESHIRT",
+              "4HEAD", "JEBAITED"},
     "SHOCK": {"WTF", "OMG", "HUH", "BRUH", "WIDEPEEPO", "NOWAY", "???", "WHAT",
-              "HOLY", "NOSHOT", "NAHHH", "NAH", "BRO", "WAIT"},
+              "HOLY", "NOSHOT", "NAHHH", "NAH", "BRO", "WAIT", "MONKAW",
+              "MONKAS", "CRASHOUT"},
     "DRAMA": {"L", "RATIO", "CRINGE", "SADGE", "YIKES", "FELLOFF", "NOOO", "COPE",
-              "MALD", "TOUCH", "GRASS", "BOZO"},
+              "MALD", "TOUCH", "GRASS", "BOZO", "COOKED", "COPIUM", "REAL"},
 }
 
 # Reverse lookup: uppercase token → bucket name
@@ -67,6 +69,8 @@ _TOKEN_TO_BUCKET: dict[str, str] = {
     for bucket, tokens in MOOD_LEXICON.items()
     for tok in tokens
 }
+
+BREAK_MARKERS = {"ASSEMBLE", "SCATTER"}
 
 PILLAR_WEIGHTS = {"velocity": 0.375, "mood": 0.375, "echo": 0.25}
 
@@ -159,6 +163,15 @@ def classify_mood(window_bodies: list[str]) -> tuple[str, float, int, float]:
     # Shrinkage: a peak with only 5 mood tokens can't score 100 even if unanimous
     mood_score = min(100.0, 200 * concentration * min(1.0, total / 20))
     return (dominant, concentration, total, mood_score)
+
+
+def has_break_marker(window_bodies: list[str]) -> bool:
+    """True when a window is bathroom/break noise, not a clip signal."""
+    for body in window_bodies:
+        tokens = {raw.upper().rstrip("!?,.") for raw in body.split()}
+        if tokens & BREAK_MARKERS:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +341,8 @@ def score_peak(
         for c in comments
         if (off := extract_offset(c)) is not None and ws <= off < we
     ]
+    if has_break_marker(win_bodies):
+        return {}
     mood, concentration, mood_tok_total, mood_score = classify_mood(win_bodies)
 
     # Echo — 2-minute retention after peak
@@ -404,9 +419,11 @@ def score_peaks(
 
     eligible = [pk for pk in peaks if pk["seconds"] >= _SKIP_SECONDS] or peaks
     scored = [
-        score_peak(pk, minute_counts, comments,
-                   global_median=global_median, p99=p99, chapters=chapters or [])
+        scored
         for pk in eligible
+        if (scored := score_peak(pk, minute_counts, comments,
+                                 global_median=global_median, p99=p99,
+                                 chapters=chapters or []))
     ]
     return merge_overlapping_windows(scored)
 
@@ -428,12 +445,15 @@ def score_from_paths(
 # ---------------------------------------------------------------------------
 
 def write_csv(scored: list[dict], out_path: str | Path) -> None:
-    fields = ["rank", "virality", "timestamp", "cut_window", "mood",
+    fields = ["rank", "virality", "timestamp", "seconds", "cut_start", "cut_end", "cut_window", "mood",
               "echo_label", "velocity_x", "magnitude", "segment", "reasoning"]
     rows = [{
         "rank":       p["rank"],
         "virality":   p["virality"],
         "timestamp":  p["timestamp"],
+        "seconds":    p["seconds"],
+        "cut_start":  p["cut_start"],
+        "cut_end":    p["cut_end"],
         "cut_window": p["cut_window"],
         "mood":       p["mood"],
         "echo_label": p["echo_label"],

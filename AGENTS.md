@@ -59,21 +59,29 @@ Optional `--info <yt-dlp .info.json>` reads the `chapters` array and:
 ```bash
 pip install -r requirements.txt
 
-# The agent (recommended — orchestrates fetch + analysis from natural language)
+# Symbiote starts in manual mode by default; summon Symbot for the Gemini agent.
 # Get a free key at https://aistudio.google.com/app/apikey
 setx GEMINI_API_KEY "AIza..."           # PowerShell, close + reopen terminal
-python symbiote.py
-python symbiote.py --pro                # Gemini 2.5 Pro for deeper analysis
+python symbiote.py                      # asks "Summon agent Symbot? [y/N]"
+python symbiote.py --agent --provider auto
+python symbiote.py --agent --provider groq --model fast
+python symbiote.py --agent --provider gemini --fallback-provider groq
+python symbiote.py --pro --agent        # Gemini 2.5 Pro for deeper analysis
 
 # Raw scripts (fallback / CI / power-user path)
 python fetch_chat.py https://www.twitch.tv/videos/<id> --max-seconds 23766
 python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 15
 python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
+python export_top_clips.py archive/<dir>/viral_score.csv --chat archive/<dir>/chat.json --video path/to/vod.mp4 --dry-run
 ```
 
 **Why Gemini:** the project ships to users, and Gemini 2.5 Flash has a free tier — no payment method required. Anthropic's API is pay-as-you-go.
 
+**Provider fallback:** Gemini is primary by default. If Gemini returns quota/rate-limit exhaustion, Symbot retries the same turn on Groq when `GROQ_API_KEY` is set. `--no-fallback` disables this.
+
 **Free-tier limits (verified live 2026-04-23):** Gemini 2.5 Flash free tier is **5 RPM** per project (error: `generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5`) plus a daily cap. A single Symbiote turn often fires 2 API calls (tool dispatch + result synthesis), so a heavy conversation hits this quickly. `chat_turn` catches 429s, parses the `retryDelay` field from the error, sleeps that long, and retries up to 3 times (`_open_stream` / `_retry_delay_from`). Users see a `[rate-limited — waiting Ns then retrying]` inline while it waits.
+
+**Break markers:** `ASSEMBLE` means bathroom/break start, and `SCATTER` means return from break. They are not hype/shock signals. `viral_score.py` and `export_top_clips.py` remove windows with either marker from clip consideration.
 
 **Ownership split:** Gemini is for **general-public distribution** — anyone can clone the repo, grab a free AI Studio key, and run `symbiote.py`. The repo owner personally uses Codex (this file's reader) for their own analyses, hitting the raw scripts directly via Bash/Read tools — no Gemini quota, no chatbot intermediary. That's why we keep the raw scripts fully functional alongside `symbiote.py`.
 
@@ -105,6 +113,7 @@ Six tools exposed to Gemini via function-declarations in `symbiote.py`:
 | `fetch_vod` | Download chat + yt-dlp info, archive into dated folder, write `meta.json`. Cache-hits if already archived. |
 | `list_vods` | Walk `archive/` and return all known VODs with metadata. Also picks up legacy flat-layout chats. |
 | `get_peaks` | Bin chat into buckets, return top-N peaks with HH:MM:SS + chapter label. |
+| `export_top_clips` | Cut the best Siphon clips to `~/Desktop/VODClips` with metadata, upload copy, manifest, and optional thumbnails. Uses local videos in `~/Desktop/VODs` first, then falls back to the Twitch VOD URL. |
 | `analyze_window` | Given a timestamp + duration, return top tokens and sampled messages. Accepts `H:MM:SS`, `H:MM`, or raw seconds. |
 | `search_chat` | Regex-search the chat. Returns total matches + density peaks. |
 | `open_heatmap` | `os.startfile` the VOD's heatmap.png (regenerates via `heatmap.py` if missing). |
