@@ -60,6 +60,10 @@ for _stream in (sys.stdout, sys.stderr):
             pass
 
 
+class DailyQuotaExhausted(Exception):
+    pass
+
+
 # ---- Worm spinner -------------------------------------------------------
 # A tiny ANSI-drawn parasite that wiggles while the agent blocks on network
 # or runs a tool. Auto-disables when stdout isn't a TTY (piped input, logs).
@@ -664,6 +668,14 @@ def _retry_delay_from(err):
     return 30.0
 
 
+_DAILY_QUOTA_MARKERS = ("PerDay", "free_tier_requests", "FreeTier")
+
+
+def _is_daily_quota_error(err):
+    s = str(err)
+    return any(m in s for m in _DAILY_QUOTA_MARKERS)
+
+
 def _open_stream(client, model, contents, config, on_token):
     """generate_content_stream with polite retry on 429 rate-limit."""
     for attempt in range(3):
@@ -674,6 +686,8 @@ def _open_stream(client, model, contents, config, on_token):
         except Exception as e:
             s = str(e)
             if "429" in s or "RESOURCE_EXHAUSTED" in s:
+                if _is_daily_quota_error(e):
+                    raise DailyQuotaExhausted() from e
                 delay = _retry_delay_from(e)
                 on_token(f"\n  [rate-limited — waiting {delay:.0f}s then retrying]\n")
                 time.sleep(delay)
@@ -801,6 +815,17 @@ def main():
             chat_turn(client, model, contents,
                       on_token=lambda t: print(t, end="", flush=True),
                       spinner=spinner)
+        except DailyQuotaExhausted:
+            spinner.stop()
+            print("\n[daily free-tier quota exhausted — Symbiote is out of juice for today.]")
+            print("Try again tomorrow, or check https://ai.google.dev/gemini-api/docs/rate-limits")
+            try:
+                ans = input("exit now? [y/n] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                ans = "y"
+            if ans in ("y", "yes"):
+                print("bye.")
+                return
         except Exception as e:
             print(f"\n[API error: {type(e).__name__}: {e}]")
         except KeyboardInterrupt:
