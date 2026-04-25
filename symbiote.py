@@ -688,12 +688,32 @@ def tool_search_chat(vod_id, pattern, bin_size=60, case_sensitive=False, top=10)
     except re.error as e:
         return {"error": f"Bad regex: {e}"}
     comments = load_comments(path)
-    matches, buckets = 0, Counter()
+    matches, buckets, samples = 0, Counter(), []
     for c in comments:
-        if rx.search(extract_body(c)):
+        body = extract_body(c)
+        if rx.search(body):
             matches += 1
-            off = float(c.get("content_offset_seconds", 0))
+            off = extract_offset(c)
+            if off is None:
+                off = 0
+            off = float(off)
             buckets[int(off // bin_size)] += 1
+            if len(samples) < top:
+                commenter = c.get("commenter") if isinstance(c.get("commenter"), dict) else {}
+                user = (
+                    commenter.get("display_name")
+                    or commenter.get("login")
+                    or commenter.get("name")
+                    or c.get("user_name")
+                    or c.get("username")
+                    or ""
+                )
+                samples.append({
+                    "timestamp": hms(off),
+                    "seconds": int(off),
+                    "user": user,
+                    "body": body[:220],
+                })
     ranked = buckets.most_common(top)
     return {
         "vod_id": vod_id,
@@ -704,6 +724,7 @@ def tool_search_chat(vod_id, pattern, bin_size=60, case_sensitive=False, top=10)
             "seconds": b * bin_size,
             "count": n,
         } for b, n in ranked],
+        "samples": samples,
     }
 
 
@@ -1332,6 +1353,13 @@ def _print_tool_result(result: dict) -> None:
             rank = p.get("rank")
             prefix = f"{_CRIMSON}#{rank:2}{_RST}" if rank is not None else "   "
             print(f"  {prefix}  {_EMBER}{p['timestamp']}{_RST}  {_SILVER}{p['count']:4}{_RST} msgs{seg}")
+        samples = result.get("samples") or []
+        if samples:
+            print(f"  {_DIM}messages{_RST}")
+            for s in samples:
+                user = s.get("user") or "unknown"
+                body = str(s.get("body") or "").replace("\n", " ").strip()
+                print(f"    {_EMBER}{s.get('timestamp')}{_RST}  {_SILVER}{user}{_RST}: \"{body}\"")
         return
     if "clips" in result:
         for c in result["clips"]:
