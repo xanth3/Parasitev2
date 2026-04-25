@@ -870,6 +870,64 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
     }
 
 
+def tool_best_scores(top=15, bin_size=60, limit=0):
+    """Score every archived VOD and return the highest-scored moment from each."""
+    vods = tool_list_vods().get("vods", [])
+    if limit and limit > 0:
+        vods = vods[:limit]
+
+    results, errors = [], []
+    for v in vods:
+        vod_id = v.get("vod_id")
+        if not vod_id:
+            continue
+        scored = tool_get_virality(vod_id, top=top, bin_size=bin_size)
+        if scored.get("error"):
+            errors.append({
+                "vod_id": vod_id,
+                "streamer": v.get("streamer"),
+                "upload_date": v.get("upload_date"),
+                "error": scored["error"],
+            })
+            continue
+        clips = scored.get("clips") or []
+        if not clips:
+            errors.append({
+                "vod_id": vod_id,
+                "streamer": v.get("streamer"),
+                "upload_date": v.get("upload_date"),
+                "error": "No scored clips returned.",
+            })
+            continue
+        best = clips[0]
+        results.append({
+            "vod_id": vod_id,
+            "streamer": v.get("streamer"),
+            "title": v.get("title"),
+            "upload_date": v.get("upload_date"),
+            "messages": v.get("messages"),
+            "duration_seconds": v.get("duration_seconds"),
+            "rank": best.get("rank"),
+            "virality": best.get("virality"),
+            "timestamp": best.get("timestamp"),
+            "cut_window": best.get("cut_window"),
+            "mood": best.get("mood"),
+            "echo_label": best.get("echo_label"),
+            "segment": best.get("segment"),
+            "reasoning": best.get("reasoning"),
+            "archive_dir": v.get("archive_dir"),
+        })
+
+    results.sort(key=lambda r: float(r.get("virality") or 0), reverse=True)
+    return {
+        "best_scores": results,
+        "errors": errors,
+        "vod_count": len(vods),
+        "scored_count": len(results),
+        "error_count": len(errors),
+    }
+
+
 def tool_export_top_clips(
     vod_id,
     top=5,
@@ -1152,6 +1210,18 @@ TOOLS = [
         },
     },
     {
+        "name": "best_scores",
+        "description": "Score every archived VOD and return the highest-scored Siphon moment from each VOD. Use when the user wants the best moment per VOD or to compare all archived VODs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "top": {"type": "integer", "description": "How many peaks to score inside each VOD", "default": 15},
+                "bin_size": {"type": "integer", "description": "Heatmap bucket size in seconds", "default": 60},
+                "limit": {"type": "integer", "description": "Optional max number of archived VODs to scan; 0 means all", "default": 0},
+            },
+        },
+    },
+    {
         "name": "export_top_clips",
         "description": "Cut the top Siphon moments into MP4 clips and write upload metadata/copy to ~/Desktop/VODClips. Prefers local video files in ~/Desktop/VODs and falls back to the Twitch VOD URL.",
         "parameters": {
@@ -1252,6 +1322,7 @@ TOOL_FUNCS = {
     "list_vods":     tool_list_vods,
     "get_peaks":     tool_get_peaks,
     "get_virality":  tool_get_virality,
+    "best_scores":   tool_best_scores,
     "export_top_clips": tool_export_top_clips,
     "export_codex_clips": tool_export_codex_clips,
     "analyze_window": tool_analyze_window,
@@ -1422,6 +1493,24 @@ def _print_tool_result(result: dict) -> None:
                   f"{_DIM}{v.get('upload_date','')}{_RST}  "
                   f"{msgs_str} msgs  {h}h{m:02d}m")
         return
+    if "best_scores" in result:
+        scores = result["best_scores"]
+        if not scores:
+            print(f"  {_DIM}(no scored VODs found){_RST}")
+        for r in scores:
+            score = r.get("virality") or 0
+            sc = _CRIMSON if score >= 85 else _EMBER if score >= 60 else _DIM
+            print(f"  {sc}{score:3}/100{_RST}  {_EMBER}{r.get('vod_id')}{_RST}  "
+                  f"{_SILVER}{r.get('timestamp')}{_RST}  {_DIM}{r.get('upload_date') or ''}{_RST}  "
+                  f"{_SILVER}{r.get('mood') or 'UNKNOWN':<7}{_RST}  {r.get('cut_window') or ''}")
+            if r.get("reasoning"):
+                print(f"      {_DIM}{r['reasoning']}{_RST}")
+        errors = result.get("errors") or []
+        if errors:
+            print(f"  {_DIM}{len(errors)} VODs skipped/errors{_RST}")
+            for e in errors[:5]:
+                print(f"      {_DIM}{e.get('vod_id')}: {e.get('error')}{_RST}")
+        return
     if "peaks" in result:
         if "total_matches" in result:
             print(f"  {_SILVER}{result['total_matches']:,} matches{_RST}")
@@ -1542,6 +1631,7 @@ _MANUAL_MENU = [
     ("fetch", "download/cache a VOD"),
     ("peaks", "raw peak density"),
     ("score", "Siphon virality scoring"),
+    ("best", "best score per VOD"),
     ("export", "cut top clips"),
     ("codex", "Codex-style clips (drama zoom + crawl)"),
     ("window", "analyze timestamp window"),
@@ -1591,6 +1681,9 @@ def _menu_command_line(cmd: str) -> str:
                 if vertical in ("y", "yes"):
                     line += " --vertical"
         return line
+    if cmd == "best":
+        limit = input("limit VOD count [Enter for all]: ").strip()
+        return f"best {limit}" if limit else "best"
     if cmd == "window":
         vod = _pick_vod()
         if not vod:
@@ -1772,6 +1865,7 @@ def manual_repl(args=None) -> None:
             print(_vamp_cmd("list", "show archived VODs"))
             print(_vamp_cmd("peaks <id> [top=15]", "raw peak density"))
             print(_vamp_cmd("score <id> [top=15]", "Siphon virality scoring"))
+            print(_vamp_cmd("best [limit]", "highest score in each VOD"))
             print(_vamp_cmd("export <id> [top=5]", "cut top clips"))
             print(f"  {_DIM}  flags: --subtitles --subtitle-model tiny --subtitle-font-size 28{_RST}")
             print(_vamp_cmd("codex <id> [top=5] [--raw]", "Codex clips (zoom + crawl)"))
@@ -1816,6 +1910,12 @@ def manual_repl(args=None) -> None:
             if len(argv) > 1 and argv[1].isdigit():
                 kwargs["top"] = int(argv[1])
             _run_tool_with_spinner("get_virality", kwargs)
+        elif cmd in ("best", "bestscores", "topvods"):
+            argv = rest.split()
+            kwargs = {}
+            if argv and argv[0].isdigit():
+                kwargs["limit"] = int(argv[0])
+            _run_tool_with_spinner("best_scores", kwargs)
         elif cmd == "export":
             if not rest.strip():
                 print("  usage: export <vod_id> [top] [--subtitles] [--subtitle-model tiny] [--subtitle-font-size 28]")
