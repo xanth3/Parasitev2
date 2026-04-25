@@ -861,9 +861,14 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
         for p in scored[:top]
     ]
     avg_score = round(sum(float(p["virality"]) for p in scored) / len(scored), 1) if scored else 0
+    velocities = [float(p.get("velocity_multiplier") or 0) for p in scored]
+    avg_velocity = round(sum(velocities) / len(velocities), 2) if velocities else 0
+    highest_velocity = round(max(velocities), 2) if velocities else 0
     return {
         "vod_id": vod_id,
         "average_score": avg_score,
+        "average_velocity": avg_velocity,
+        "highest_velocity": highest_velocity,
         "clips": clips,
         "artifacts": {
             "viral_score_csv":   str(d / "viral_score.csv") if d else None,
@@ -903,6 +908,8 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
             continue
         best = clips[0]
         avg_score = scored.get("average_score")
+        avg_velocity = scored.get("average_velocity")
+        highest_velocity = scored.get("highest_velocity")
         results.append({
             "vod_id": vod_id,
             "streamer": v.get("streamer"),
@@ -913,6 +920,9 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
             "rank": best.get("rank"),
             "virality": best.get("virality"),
             "average_score": avg_score,
+            "velocity_multiplier": best.get("velocity_multiplier"),
+            "average_velocity": avg_velocity,
+            "highest_velocity": highest_velocity,
             "timestamp": best.get("timestamp"),
             "cut_window": best.get("cut_window"),
             "mood": best.get("mood"),
@@ -969,7 +979,10 @@ def tool_average_scores(top=15, bin_size=60, limit=0):
             "messages": v.get("messages"),
             "duration_seconds": v.get("duration_seconds"),
             "average_score": scored.get("average_score"),
+            "average_velocity": scored.get("average_velocity"),
+            "highest_velocity": scored.get("highest_velocity"),
             "best_score": clips[0].get("virality"),
+            "best_velocity": clips[0].get("velocity_multiplier"),
             "best_timestamp": clips[0].get("timestamp"),
             "archive_dir": v.get("archive_dir"),
         })
@@ -1569,10 +1582,15 @@ def _print_tool_result(result: dict) -> None:
         for r in scores:
             score = r.get("virality") or 0
             avg = r.get("average_score")
+            velocity = r.get("velocity_multiplier") or 0
+            avg_velocity = r.get("average_velocity") or 0
+            highest_velocity = r.get("highest_velocity") or 0
             sc = _CRIMSON if score >= 85 else _EMBER if score >= 60 else _DIM
             print(f"  {sc}{score:3}/100{_RST}  {_EMBER}{r.get('vod_id')}{_RST}  "
                   f"{_SILVER}{r.get('timestamp')}{_RST}  {_DIM}{r.get('upload_date') or ''}{_RST}  "
-                  f"{_SILVER}{r.get('mood') or 'UNKNOWN':<7}{_RST}  {r.get('cut_window') or ''}")
+                  f"{_SILVER}{r.get('mood') or 'UNKNOWN':<7}{_RST}  "
+                  f"{_DIM}V: {velocity:.1f}x (A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x){_RST}  "
+                  f"{r.get('cut_window') or ''}")
             if avg is not None:
                 print(f"      {_SILVER}Avg. Score: {avg}{_RST}")
             if r.get("reasoning"):
@@ -1589,9 +1607,12 @@ def _print_tool_result(result: dict) -> None:
             print(f"  {_DIM}(no average scores found){_RST}")
         for r in scores:
             avg = r.get("average_score") or 0
+            avg_velocity = r.get("average_velocity") or 0
+            highest_velocity = r.get("highest_velocity") or 0
             sc = _CRIMSON if avg >= 85 else _EMBER if avg >= 60 else _DIM
             print(f"  {_EMBER}{r.get('vod_id')}{_RST}  {_DIM}{r.get('upload_date') or ''}{_RST}  "
                   f"{sc}Avg. Score: {avg}{_RST}  "
+                  f"{_DIM}V: A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x{_RST}  "
                   f"{_SILVER}Best: {r.get('best_score')}/100 @ {r.get('best_timestamp')}{_RST}")
         errors = result.get("errors") or []
         if errors:
@@ -1624,6 +1645,8 @@ def _print_tool_result(result: dict) -> None:
     if "clips" in result:
         if "average_score" in result:
             print(f"  {_SILVER}Avg. Score: {result['average_score']}{_RST}")
+        avg_velocity = result.get("average_velocity") or 0
+        highest_velocity = result.get("highest_velocity") or 0
         for c in result["clips"]:
             if "rank" in c:
                 score = c['virality']
@@ -1631,6 +1654,8 @@ def _print_tool_result(result: dict) -> None:
                 print(f"  {_CRIMSON}#{c['rank']:2}{_RST}  {sc}{score:3}/100{_RST}  "
                       f"{_EMBER}{c['cut_window']}{_RST}  "
                       f"{_SILVER}{c['mood']:<7}{_RST}  {_DIM}{c['echo_label']:<12}{_RST}  "
+                      f"{_DIM}V: {float(c.get('velocity_multiplier') or 0):.1f}x "
+                      f"(A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x){_RST}  "
                       f"{_DIM}{c['reasoning']}{_RST}")
             else:
                 score = c.get('score', 0) or 0
