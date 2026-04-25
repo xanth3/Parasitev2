@@ -728,6 +728,66 @@ def tool_search_chat(vod_id, pattern, bin_size=60, case_sensitive=False, top=10)
     }
 
 
+def _comment_user(comment) -> str:
+    commenter = comment.get("commenter") if isinstance(comment.get("commenter"), dict) else {}
+    return (
+        commenter.get("display_name")
+        or commenter.get("login")
+        or commenter.get("name")
+        or comment.get("user_name")
+        or comment.get("username")
+        or ""
+    )
+
+
+def tool_search_user(vod_id, user, bin_size=60, case_sensitive=False, top=20):
+    path = chat_path(vod_id)
+    if not path:
+        return {"error": f"No chat cached for VOD {vod_id}."}
+    flags = 0 if case_sensitive else re.IGNORECASE
+    try:
+        rx = re.compile(user, flags)
+    except re.error as e:
+        return {"error": f"Bad user regex: {e}"}
+
+    comments = load_comments(path)
+    matches, buckets, samples = 0, Counter(), []
+    distinct_users = Counter()
+    for c in comments:
+        sender = _comment_user(c)
+        if not sender or not rx.search(sender):
+            continue
+        matches += 1
+        distinct_users[sender] += 1
+        off = extract_offset(c)
+        if off is None:
+            off = 0
+        off = float(off)
+        buckets[int(off // bin_size)] += 1
+        if len(samples) < top:
+            body = extract_body(c)
+            samples.append({
+                "timestamp": hms(off),
+                "seconds": int(off),
+                "user": sender,
+                "body": body[:220],
+            })
+
+    ranked = buckets.most_common(top)
+    return {
+        "vod_id": vod_id,
+        "user_query": user,
+        "total_messages": matches,
+        "matched_users": [{"user": u, "count": n} for u, n in distinct_users.most_common(10)],
+        "peaks": [{
+            "timestamp": hms(b * bin_size),
+            "seconds": b * bin_size,
+            "count": n,
+        } for b, n in ranked],
+        "samples": samples,
+    }
+
+
 def tool_open_heatmap(vod_id):
     chat = chat_path(vod_id)
     if not chat:
@@ -1147,7 +1207,7 @@ TOOLS = [
     },
     {
         "name": "search_chat",
-        "description": "Search chat for a regex pattern. Returns total matches plus the top buckets where the pattern spiked. Use for 'when did people spam X', 'heatmap of Y word'.",
+        "description": "Search message text for a regex pattern. Returns total matches, top buckets where the pattern spiked, and sample messages with senders. Use for 'when did people spam X', 'heatmap of Y word'.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1158,6 +1218,21 @@ TOOLS = [
                 "top": {"type": "integer", "default": 10},
             },
             "required": ["vod_id", "pattern"],
+        },
+    },
+    {
+        "name": "search_user",
+        "description": "Look up a chatter by username/display name regex. Returns that user's message count, active buckets, and sample messages with timestamps.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "vod_id": {"type": "string"},
+                "user": {"type": "string", "description": "Username/display-name regex"},
+                "bin_size": {"type": "integer", "default": 60},
+                "case_sensitive": {"type": "boolean", "default": False},
+                "top": {"type": "integer", "default": 20},
+            },
+            "required": ["vod_id", "user"],
         },
     },
     {
@@ -1181,6 +1256,7 @@ TOOL_FUNCS = {
     "export_codex_clips": tool_export_codex_clips,
     "analyze_window": tool_analyze_window,
     "search_chat":   tool_search_chat,
+    "search_user":   tool_search_user,
     "open_heatmap":  tool_open_heatmap,
 }
 
@@ -1291,7 +1367,7 @@ def chat_turn(router: LLMRouter, messages: list[dict], on_token, spinner=None):
             spinner.stop()
 
     while True:
-        _spin_start("thinking…")
+        _spin_start("thinking...")
         try:
             result, provider, model = router.run_turn(messages, TOOLS, on_token)
         finally:
@@ -1310,8 +1386,9 @@ def chat_turn(router: LLMRouter, messages: list[dict], on_token, spinner=None):
             name = call["name"]
             args = call.get("arguments") or {}
             preview = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:2])
-            on_token(f"\n  · {name}({preview})")
-            _spin_start(f"{name}…")
+            verb = _tool_verb(name)
+            on_token(f"\n  {_BLOOD}*{_RST} {_EMBER}{name}{_DIM}({preview}){_RST}")
+            _spin_start(f"{verb}...")
             tool_result = run_tool(name, args)
             _spin_stop()
             messages.append({
@@ -1348,6 +1425,12 @@ def _print_tool_result(result: dict) -> None:
     if "peaks" in result:
         if "total_matches" in result:
             print(f"  {_SILVER}{result['total_matches']:,} matches{_RST}")
+        elif "total_messages" in result:
+            print(f"  {_SILVER}{result['total_messages']:,} messages{_RST}")
+            matched_users = result.get("matched_users") or []
+            if matched_users:
+                users = ", ".join(f"{u['user']} x{u['count']}" for u in matched_users[:5])
+                print(f"  {_DIM}matched users: {users}{_RST}")
         for p in result["peaks"]:
             seg = f"  {_DIM}{p.get('segment','')}{_RST}" if p.get("segment") else ""
             rank = p.get("rank")
@@ -1463,6 +1546,7 @@ _MANUAL_MENU = [
     ("codex", "Codex-style clips (drama zoom + crawl)"),
     ("window", "analyze timestamp window"),
     ("search", "regex search"),
+    ("user", "lookup chatter"),
     ("heatmap", "open heatmap PNG"),
     ("agent", "summon Symbot"),
     ("help", "show commands"),
@@ -1520,6 +1604,12 @@ def _menu_command_line(cmd: str) -> str:
             return ""
         pattern = input("pattern: ").strip()
         return f"search {vod} {pattern}"
+    if cmd == "user":
+        vod = _pick_vod()
+        if not vod:
+            return ""
+        user = input("user regex: ").strip()
+        return f"user {vod} {user}"
     return cmd
 
 
@@ -1687,7 +1777,8 @@ def manual_repl(args=None) -> None:
             print(_vamp_cmd("codex <id> [top=5] [--raw]", "Codex clips (zoom + crawl)"))
             print(f"  {_DIM}  flags: --vertical --no-crawl --no-zoom --raw{_RST}")
             print(_vamp_cmd("window <id> <start> [dur=60]", "analyze timestamp window"))
-            print(_vamp_cmd("search <id> <pattern>", "regex search chat"))
+            print(_vamp_cmd("search <id> <pattern>", "regex search messages"))
+            print(_vamp_cmd("user <id> <name>", "lookup messages by sender"))
             print(_vamp_cmd("heatmap <id>", "open heatmap PNG"))
             print(f"  {_BLOOD}{'─' * 50}{_RST}")
             print(_vamp_cmd("agent", "summon Symbot (AI mode)"))
@@ -1758,6 +1849,12 @@ def manual_repl(args=None) -> None:
                 print("  usage: search <vod_id> <pattern>")
                 continue
             _run_tool_with_spinner("search_chat", {"vod_id": argv[0], "pattern": argv[1]})
+        elif cmd in ("user", "chatter"):
+            argv = rest.split(None, 1)
+            if len(argv) < 2:
+                print("  usage: user <vod_id> <username_or_regex>")
+                continue
+            _run_tool_with_spinner("search_user", {"vod_id": argv[0], "user": argv[1]})
         elif cmd == "heatmap":
             argv = rest.split()
             if not argv:
@@ -1772,44 +1869,47 @@ def _agent_repl(args) -> None:
     try:
         router = LLMRouter(args)
     except ProviderConfigError as e:
-        print(f"{e} — staying in manual mode.")
-        print("(Set GEMINI_API_KEY and/or GROQ_API_KEY in .env or your shell)")
+        print(f"{_CRIMSON}[error]{_RST} {e} — staying in manual mode.")
+        print(f"{_DIM}(Set GEMINI_API_KEY and/or GROQ_API_KEY in .env or your shell){_RST}")
         print()
         manual_repl(args)
         return
 
     messages = []
-    spinner = WormSpinner()
+    spinner = _VampSpinner("thinking...")
 
-    fallback = f", fallback={router.fallback_provider}:{router.fallback_model}" if router.fallback_provider != "none" else ", fallback=none"
-    print(f"~~ Symbot summoned. primary={router.primary_provider}:{router.primary_model}{fallback} ~~")
-    print("drop a VOD link, ask about one I already have, or 'exit' to leave.\n")
+    fallback = (f", fallback={_DIM}{router.fallback_provider}:{router.fallback_model}{_RST}"
+                if router.fallback_provider != "none" else f", {_DIM}fallback=none{_RST}")
+    print(_SYMBIOTE_BANNER)
+    print(f"  {_CRIMSON}SYMBOT SUMMONED{_RST}")
+    print(f"  {_DIM}primary={_SILVER}{router.primary_provider}:{router.primary_model}{_RST}{fallback}")
+    print(f"  {_DIM}drop a VOD link, ask about one I already have, or {_CRIMSON}exit{_DIM} to leave.{_RST}\n")
 
     while True:
         try:
-            user_input = input("you> ").strip()
+            user_input = input(f"{_BLOOD}血{_DIM}>{_RST} ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nbye.")
+            print(f"\n{_BLOOD}the symbiote detaches.{_RST}")
             return
         if not user_input:
             continue
         if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
-            print("bye.")
+            print(f"{_BLOOD}the symbiote detaches.{_RST}")
             return
 
         messages.append({"role": "user", "content": user_input})
-        print("symbot> ", end="", flush=True)
+        print(f"{_PURPLE}symbot>{_RST} ", end="", flush=True)
         try:
             chat_turn(router, messages,
                       on_token=lambda t: print(t, end="", flush=True),
                       spinner=spinner)
         except ProviderQuotaError as e:
             spinner.stop()
-            print(f"\n[quota/rate-limit: {e}]")
+            print(f"\n{_CRIMSON}[quota/rate-limit: {e}]{_RST}")
         except Exception as e:
-            print(f"\n[API error: {type(e).__name__}: {e}]")
+            print(f"\n{_CRIMSON}[API error: {type(e).__name__}: {e}]{_RST}")
         except KeyboardInterrupt:
-            print("\n[interrupted]")
+            print(f"\n{_DIM}[interrupted]{_RST}")
         print()
 
 
@@ -1841,7 +1941,7 @@ def main():
 
     if not args.manual and sys.stdin.isatty():
         try:
-            ans = input("Summon agent Symbot? [y/N] ").strip().lower()
+            ans = input(f"{_PURPLE}Summon agent Symbot?{_RST} {_DIM}[y/N]{_RST} ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             ans = ""
         if ans in ("y", "yes"):
