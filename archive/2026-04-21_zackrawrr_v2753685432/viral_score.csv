@@ -1,0 +1,11 @@
+rank,virality,timestamp,cut_window,mood,echo_label,velocity_x,magnitude,segment,reasoning
+1,69,1:31:00,1:30:32 → 1:32:37,FUNNY,Story,1.9×,0.96,Just Chatting,1.8× velocity · FUNNY (0.53) · Story echo 0.67 · p96 volume
+2,69,3:16:00,3:15:32 → 3:18:32,FUNNY,Story,2.4×,0.95,Just Chatting,2.4× velocity · FUNNY (0.46) · Story echo 0.72 · p95 volume
+3,66,2:44:00,2:43:22 → 2:46:22,FUNNY,Lingering,1.8×,0.98,Just Chatting,1.8× velocity · FUNNY (0.51) · Lingering echo 0.59 · p98 volume
+4,63,2:10:00,2:09:05 → 2:11:37,FUNNY,Story,1.2×,0.99,Just Chatting,1.2× velocity · FUNNY (0.62) · Story echo 0.61 · p99 volume
+5,63,2:34:00,2:33:44 → 2:35:12,SHOCK,Story,1.2×,0.95,Just Chatting,1.2× velocity · SHOCK (0.62) · Story echo 0.71 · p94 volume
+6,63,3:35:00,3:34:56 → 3:36:11,SHOCK,Story,1.4×,0.93,Just Chatting,1.5× velocity · SHOCK (0.73) · Story echo 0.62 · p92 volume
+7,63,5:01:00,5:00:38 → 5:02:36,FUNNY,Story,1.7×,1.00,Just Chatting,1.7× velocity · FUNNY (0.45) · Story echo 0.61 · p99 volume
+8,62,3:21:00,3:20:35 → 3:22:13,SHOCK,Story,1.3×,0.94,Just Chatting,1.3× velocity · SHOCK (0.49) · Story echo 0.64 · p94 volume
+9,59,2:05:00,2:04:06 → 2:06:14,SHOCK,Story,1.5×,0.92,Just Chatting,1.5× velocity · SHOCK (0.42) · Story echo 0.73 · p91 volume
+10,57,2:52:00,2:51:44 → 2:53:07,SHOCK,Lingering,1.6×,1.00,Just Chatting,1.6× velocity · SHOCK (0.65) · Lingering echo 0.35 · p100 volume

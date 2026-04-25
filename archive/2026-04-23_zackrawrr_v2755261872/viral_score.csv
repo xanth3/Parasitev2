@@ -1,0 +1,28 @@
+rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,echo_label,velocity_x,magnitude,segment,reasoning
+1,71,2:05:00,7500,7478,7680,2:04:38 → 2:08:00,SHOCK,Story,2.0×,1.00,Just Chatting,2.0× velocity · SHOCK (0.59) · Story echo 0.91 · p100 volume
+2,70,3:59:00,14340,14253,14460,3:57:33 → 4:01:00,SHOCK,Story,1.8×,1.00,Just Chatting,1.8× velocity · SHOCK (0.72) · Story echo 0.92 · p99 volume
+3,69,2:32:00,9120,9107,9299,2:31:47 → 2:34:59,SHOCK,Story,2.2×,0.91,Just Chatting,2.2× velocity · SHOCK (0.49) · Story echo 0.86 · p90 volume
+4,68,1:44:00,6240,6201,6410,1:43:21 → 1:46:50,FUNNY,Story,1.6×,1.00,Just Chatting,1.6× velocity · FUNNY (0.59) · Story echo 0.94 · p100 volume
+5,68,3:14:00,11640,11584,11827,3:13:04 → 3:17:07,FUNNY,Story,2.2×,0.89,Just Chatting,2.2× velocity · FUNNY (0.65) · Story echo 0.91 · p89 volume
+6,66,0:29:00,1740,1733,1886,0:28:53 → 0:31:26,SHOCK,Story,1.8×,0.94,Just Chatting,1.8× velocity · SHOCK (0.83) · Story echo 0.61 · p93 volume
+7,65,3:27:00,12420,12343,12565,3:25:43 → 3:29:25,FUNNY,Story,1.5×,0.97,Just Chatting,1.5× velocity · FUNNY (0.48) · Story echo 0.70 · p96 volume
+8,63,2:35:00,9300,9270,9447,2:34:30 → 2:37:27,SHOCK,Story,1.3×,0.92,Just Chatting,1.3× velocity · SHOCK (0.64) · Story echo 0.79 · p91 volume
+9,62,2:51:00,10260,10183,10363,2:49:43 → 2:52:43,FUNNY,Lingering,1.5×,1.00,Just Chatting,1.5× velocity · FUNNY (0.52) · Lingering echo 0.51 · p100 volume
+10,61,0:24:00,1440,1428,1564,0:23:48 → 0:26:04,FUNNY,Lingering,2.7×,0.96,Just Chatting,2.7× velocity · FUNNY (0.45) · Lingering echo 0.43 · p95 volume
+11,61,0:38:00,2280,2160,2335,0:36:00 → 0:38:55,FUNNY,Story,1.7×,0.80,Just Chatting,1.7× velocity · FUNNY (0.47) · Story echo 0.75 · p80 volume
+12,61,2:38:00,9480,9476,9665,2:37:56 → 2:41:05,SHOCK,Story,1.2×,0.94,Just Chatting,1.2× velocity · SHOCK (0.48) · Story echo 1.06 · p93 volume
+13,61,3:45:00,13500,13381,13624,3:43:01 → 3:47:04,FUNNY,Story,1.2×,0.89,Just Chatting,1.2× velocity · FUNNY (0.61) · Story echo 0.80 · p89 volume
+14,61,4:31:00,16260,16256,16455,4:30:56 → 4:34:15,HYPE,Story,1.4×,0.83,Just Chatting,1.4× velocity · HYPE (0.55) · Story echo 0.92 · p83 volume
+15,60,3:49:00,13740,13714,13810,3:48:34 → 3:50:10,FUNNY,Story,1.2×,0.87,Just Chatting,1.2× velocity · FUNNY (0.50) · Story echo 0.69 · p87 volume
+16,60,4:40:00,16800,16716,16957,4:38:36 → 4:42:37,HYPE,Story,1.3×,0.81,Just Chatting,1.3× velocity · HYPE (0.56) · Story echo 0.98 · p81 volume
+17,58,3:34:00,12840,12787,12840,3:33:07 → 3:34:00,HYPE,Story,1.2×,0.83,Just Chatting,1.2× velocity · HYPE (0.75) · Story echo 0.64 · p83 volume
+18,58,4:09:00,14940,14936,14966,4:08:56 → 4:09:26,FUNNY,Story,1.2×,0.79,Just Chatting,1.2× velocity · FUNNY (0.56) · Story echo 0.73 · p78 volume
+19,57,4:07:00,14820,14789,14900,4:06:29 → 4:08:20,SHOCK,Story,1.2×,0.80,Just Chatting,1.2× velocity · SHOCK (0.48) · Story echo 0.85 · p80 volume
+20,56,1:41:00,6060,5954,6134,1:39:14 → 1:42:14,SHOCK,Story,2.5×,0.85,Just Chatting,2.5× velocity · SHOCK (0.33) · Story echo 0.77 · p84 volume
+21,55,3:04:00,11040,11004,11112,3:03:24 → 3:05:12,FUNNY,Jump Scare,2.9×,0.99,Just Chatting,2.9× velocity · FUNNY (0.45) · Jump Scare echo 0.21 · p99 volume
+22,55,4:01:00,14460,14444,14609,4:00:44 → 4:03:29,FUNNY,Story,1.2×,0.89,Just Chatting,1.2× velocity · FUNNY (0.41) · Story echo 0.88 · p89 volume
+23,54,2:55:00,10500,10485,10568,2:54:45 → 2:56:08,FUNNY,Lingering,1.2×,0.87,Just Chatting,1.2× velocity · FUNNY (0.44) · Lingering echo 0.59 · p86 volume
+24,52,2:08:00,7680,7670,7789,2:07:50 → 2:09:49,HYPE,Story,1.2×,0.89,Just Chatting,1.2× velocity · HYPE (0.38) · Story echo 0.74 · p89 volume
+25,51,1:56:00,6960,6877,7037,1:54:37 → 1:57:17,SHOCK,Lingering,1.5×,0.84,Just Chatting,1.5× velocity · SHOCK (0.47) · Lingering echo 0.38 · p83 volume
+26,49,0:32:00,1920,1909,1983,0:31:49 → 0:33:03,SHOCK,Lingering,1.4×,0.85,Just Chatting,1.4× velocity · SHOCK (0.46) · Lingering echo 0.38 · p84 volume
+27,44,4:21:00,15660,15630,15810,4:20:30 → 4:23:30,FUNNY,Lingering,1.5×,0.82,Just Chatting,1.5× velocity · FUNNY (0.30) · Lingering echo 0.57 · p82 volume

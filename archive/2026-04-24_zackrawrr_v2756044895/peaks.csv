@@ -1,0 +1,16 @@
+rank,timestamp,seconds,count,segment
+1,1:00:00,3600,636,Just Chatting
+2,0:55:00,3300,615,Just Chatting
+3,0:01:00,60,577,Just Chatting
+4,0:48:00,2880,577,Just Chatting
+5,1:02:00,3720,545,Just Chatting
+6,1:14:00,4440,510,Just Chatting
+7,1:01:00,3660,499,Just Chatting
+8,0:00:00,0,449,Just Chatting
+9,1:03:00,3780,444,Just Chatting
+10,1:11:00,4260,437,Just Chatting
+11,0:51:00,3060,422,Just Chatting
+12,0:47:00,2820,421,Just Chatting
+13,1:13:00,4380,420,Just Chatting
+14,1:19:00,4740,403,Just Chatting
+15,1:18:00,4680,401,Just Chatting

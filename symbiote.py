@@ -142,6 +142,133 @@ class WormSpinner:
         except Exception:
             pass
 
+# ---- Vampiric theme (ANSI 256-color) ------------------------------------
+_BLOOD   = "\033[38;5;124m"   # dark blood red
+_CRIMSON = "\033[38;5;196m"   # bright crimson
+_EMBER   = "\033[38;5;208m"   # amber/ember
+_SILVER  = "\033[38;5;250m"   # silver
+_DIM     = "\033[38;5;239m"   # ash gray
+_BONE    = "\033[38;5;230m"   # bone white
+_PURPLE  = "\033[38;5;99m"    # dark purple
+_FANG    = "\033[1m"          # bold
+_RST     = "\033[0m"
+
+_SYMBIOTE_BANNER = f"""{_BLOOD}
+  ███████╗██╗   ██╗███╗   ███╗██████╗ ██╗ ██████╗ ████████╗███████╗
+  ██╔════╝╚██╗ ██╔╝████╗ ████║██╔══██╗██║██╔═══██╗╚══██╔══╝██╔════╝
+  ███████╗ ╚████╔╝ ██╔████╔██║██████╔╝██║██║   ██║   ██║   █████╗
+  ╚════██║  ╚██╔╝  ██║╚██╔╝██║██╔══██╗██║██║   ██║   ██║   ██╔══╝
+  ███████║   ██║   ██║ ╚═╝ ██║██████╔╝██║╚██████╔╝   ██║   ███████╗
+  ╚══════╝   ╚═╝   ╚═╝     ╚═╝╚═════╝ ╚═╝ ╚═════╝    ╚═╝   ╚══════╝{_RST}
+{_DIM}  the parasite's mind — latched and listening{_RST}
+"""
+
+_VAMP_PROMPT = f"{_BLOOD}血{_DIM}>{_RST} "
+
+
+def _vamp_cmd(cmd: str, desc: str) -> str:
+    """Format a single command line for themed help output."""
+    return f"  {_CRIMSON}{cmd:<30}{_RST} {_DIM}{desc}{_RST}"
+
+
+# ---- Vampiric tool spinner -----------------------------------------------
+# Shows a blood-drip animation + elapsed time while a manual-mode tool runs.
+
+_DRIP_VERBS = [
+    "Draining", "Siphoning", "Leeching", "Feeding", "Extracting",
+    "Bleeding", "Devouring", "Harvesting", "Consuming", "Absorbing",
+]
+
+_DRIP_FRAMES = ["  ╽", " ╿╽", "╿ ╽", "╿╿╽", "╿╿ ", " ╿ ", "  ╿"]
+
+
+class _VampSpinner:
+    """Threaded spinner: blood-drip animation with elapsed time."""
+
+    CLEAR = "\r\033[K"
+
+    def __init__(self, label: str = ""):
+        self._label = label
+        self._stream = sys.stdout
+        self._enabled = getattr(self._stream, "isatty", lambda: False)()
+        self._running = False
+        self._thread = None
+        self._t0 = 0.0
+
+    def start(self):
+        if not self._enabled or self._running:
+            return
+        self._t0 = time.time()
+        self._running = True
+        self._thread = _threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> float:
+        if not self._running:
+            return 0.0
+        self._running = False
+        elapsed = time.time() - self._t0
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        self._thread = None
+        try:
+            self._stream.write(self.CLEAR)
+            self._stream.flush()
+        except Exception:
+            pass
+        return elapsed
+
+    def _fmt_time(self, secs: float) -> str:
+        if secs < 60:
+            return f"{secs:.0f}s"
+        m, s = divmod(int(secs), 60)
+        return f"{m}m {s:02d}s"
+
+    def _run(self):
+        tick = 0
+        while self._running:
+            frame = _DRIP_FRAMES[tick % len(_DRIP_FRAMES)]
+            elapsed = time.time() - self._t0
+            line = (f"{self.CLEAR}  {_BLOOD}{frame} {_CRIMSON}{self._label}"
+                    f"{_DIM} ({self._fmt_time(elapsed)}){_RST}")
+            try:
+                self._stream.write(line)
+                self._stream.flush()
+            except Exception:
+                return
+            time.sleep(0.12)
+            tick += 1
+
+
+def _tool_verb(name: str) -> str:
+    """Pick a thematic verb for the tool being run."""
+    _map = {
+        "fetch_vod": "Leeching",
+        "list_vods": "Scanning",
+        "get_peaks": "Siphoning",
+        "get_virality": "Bleeding",
+        "export_top_clips": "Extracting",
+        "export_codex_clips": "Harvesting",
+        "analyze_window": "Feeding",
+        "search_chat": "Hunting",
+        "open_heatmap": "Summoning",
+    }
+    return _map.get(name, "Draining")
+
+
+def _run_tool_with_spinner(name: str, args: dict) -> None:
+    """Run a tool with vampiric spinner, then pretty-print the result."""
+    verb = _tool_verb(name)
+    spinner = _VampSpinner(f"{verb}...")
+    spinner.start()
+    result = run_tool(name, args)
+    elapsed = spinner.stop()
+    # Print completion line
+    e_str = spinner._fmt_time(elapsed)
+    print(f"  {_BLOOD}*{_RST} {_SILVER}{verb}{_RST} {_DIM}({e_str}){_RST}")
+    _print_tool_result(result)
+
+
 from fetch_chat import (
     CLIENT_ID,
     fetch_page,
@@ -771,6 +898,108 @@ def tool_export_top_clips(
     }
 
 
+def tool_export_codex_clips(
+    vod_id,
+    top=5,
+    from_top=15,
+    pad=10,
+    drama_zoom=True,
+    chat_crawl=True,
+    speech_subtitles=False,
+    vertical=False,
+    logo=None,
+    raw=False,
+):
+    """Export Codex-styled clips: drama zoom, chat crawl, optional vertical."""
+    d = vod_archive_dir(vod_id)
+    cp = chat_path(vod_id)
+    if not d or not cp:
+        return {"error": f"No archived chat found for VOD {vod_id}. Call fetch_vod first."}
+
+    scores = d / "viral_score.csv"
+    if not scores.exists():
+        scored = tool_get_virality(vod_id, top=max(int(from_top), 15))
+        if "error" in scored:
+            return scored
+    if not scores.exists():
+        return {"error": f"No viral_score.csv found for VOD {vod_id}."}
+
+    video = _video_source_for(str(vod_id))
+
+    try:
+        from clipper import export_codex_clips
+        args = argparse.Namespace(
+            scores=scores,
+            chat=cp,
+            video=video,
+            top=int(top),
+            from_top=int(from_top),
+            pad=int(pad),
+            analysis_pad=None,
+            out=str(VOD_CLIPS_DIR),
+            filename_suffix="",
+            flat_output=False,
+            raw=bool(raw),
+            fast=False,
+            dry_run=False,
+            min_score=0,
+            thumbnail=True,
+            fade_duration=0.75,
+            no_fade=False,
+            drama_zoom=bool(drama_zoom),
+            drama_zoom_min_score=85,
+            drama_zoom_moods="SHOCK,DRAMA",
+            drama_zoom_duration=2.0,
+            drama_zoom_face_coverage=0.78,
+            chat_crawl=bool(chat_crawl),
+            chat_crawl_font_size=38,
+            chat_crawl_speed=6.0,
+            chat_crawl_max_concurrent=3,
+            chat_crawl_max_per_second=2,
+            logo=logo,
+            logo_size=120,
+            logo_position="top-right",
+            vertical=bool(vertical),
+            content_ratio=0.60,
+            speech_subtitles=bool(speech_subtitles),
+            subtitle_sidecar_only=False,
+            subtitle_model="tiny",
+            subtitle_language=None,
+            subtitle_device="cpu",
+            subtitle_compute_type="int8",
+            subtitle_beam_size=1,
+            subtitle_vad=True,
+            subtitle_style=(
+                "Fontname=Arial,Fontsize=28,PrimaryColour=&H00FFFFFF,"
+                "OutlineColour=&HCC000000,BorderStyle=1,Outline=3,Shadow=1,"
+                "Alignment=2,MarginV=64"
+            ),
+        )
+        result = export_codex_clips(args)
+    except Exception as e:
+        return {"error": f"codex export failed: {type(e).__name__}: {e}"}
+
+    exported = []
+    for clip in result.get("clips", []):
+        meta = clip.get("metadata", {})
+        exported.append({
+            "filename": clip.get("filename"),
+            "vertical": clip.get("vertical"),
+            "title": meta.get("title"),
+            "description": meta.get("description"),
+            "start": meta.get("start_timestamp"),
+            "end": meta.get("end_timestamp"),
+            "score": meta.get("virality"),
+            "codex_effects": meta.get("codex_effects"),
+        })
+    return {
+        "vod_id": vod_id,
+        "source_video": video,
+        "output_dir": result.get("output_dir"),
+        "clips": exported,
+    }
+
+
 SYSTEM_PROMPT = """You are Symbiote — the intelligence inside the Parasite toolkit. Parasite latches onto Twitch VODs and drains chat. You are its mind: an efficient, slightly dark content manager. Think Scooter Braun meets Dracula. You identify what people will click, what they will share, where the engagement bleeds hottest. You don't do small talk.
 
 You have tools to fetch chat, score clips, analyze windows, and search for patterns. USE THEM. Never fabricate timestamps, message counts, or chat content — if you don't have the data, call a tool.
@@ -789,6 +1018,7 @@ Workflow:
 - "when did people say Y" / "heatmap of Z" → search_chat with a regex.
 - "show me the heatmap" → open_heatmap.
 - "export clips" / "make the mp4s" → export_top_clips after get_virality if needed.
+- "codex clips" / "codex style" / "drama zoom" / "vertical clips" → export_codex_clips. Adds drama zoom, chat crawl, branding. Pass vertical=true for 9:16.
 - Unknown VOD? Call list_vods, then ask which one.
 
 When the user asks what was happening at a peak, give clip-ready output: what was on screen (inferred from chat), the cold-open line, and the exact cut window. The cut is everything."""
@@ -862,6 +1092,24 @@ TOOLS = [
         },
     },
     {
+        "name": "export_codex_clips",
+        "description": "Cut top Siphon moments with Codex visual style: drama zoom on SHOCK/DRAMA peaks, Thumerian chat crawl on HYPE/FUNNY moments, speech captions, optional logo. Primary output preserves source aspect ratio; pass vertical=true for additional 9:16 Shorts versions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "vod_id": {"type": "string", "description": "VOD numeric ID"},
+                "top": {"type": "integer", "description": "Number of clips to export", "default": 5},
+                "drama_zoom": {"type": "boolean", "description": "Face punch-in on SHOCK/DRAMA peaks", "default": True},
+                "chat_crawl": {"type": "boolean", "description": "Thumerian chat crawl on HYPE/FUNNY peaks", "default": True},
+                "speech_subtitles": {"type": "boolean", "description": "Generate and burn speech-to-text captions", "default": False},
+                "vertical": {"type": "boolean", "description": "Also produce 9:16 vertical clips", "default": False},
+                "logo": {"type": "string", "description": "Path to logo PNG for watermark"},
+                "raw": {"type": "boolean", "description": "Raw mode: clean cuts with zero post-processing (stream copy, no effects)", "default": False},
+            },
+            "required": ["vod_id"],
+        },
+    },
+    {
         "name": "analyze_window",
         "description": "Get chat signal for a specific timestamp — top tokens/emotes and sample messages. Use this to figure out what was happening at a peak or any moment the user asks about.",
         "parameters": {
@@ -909,6 +1157,7 @@ TOOL_FUNCS = {
     "get_peaks":     tool_get_peaks,
     "get_virality":  tool_get_virality,
     "export_top_clips": tool_export_top_clips,
+    "export_codex_clips": tool_export_codex_clips,
     "analyze_window": tool_analyze_window,
     "search_chat":   tool_search_chat,
     "open_heatmap":  tool_open_heatmap,
@@ -1056,51 +1305,60 @@ def chat_turn(router: LLMRouter, messages: list[dict], on_token, spinner=None):
 def _print_tool_result(result: dict) -> None:
     """Compact pretty-print for manual-mode tool output."""
     if "error" in result:
-        print(f"  [error] {result['error']}")
+        print(f"  {_CRIMSON}[error]{_RST} {result['error']}")
         if result.get("path"):
-            print(f"  path -> {result['path']}")
+            print(f"  {_DIM}path -> {result['path']}{_RST}")
         return
     # Special-case common result shapes for readability
     if "vods" in result:
         vods = result["vods"]
         if not vods:
-            print("  (no VODs archived yet)")
+            print(f"  {_DIM}(no VODs archived yet){_RST}")
             return
         for v in vods:
-            msgs = v.get("messages") or v.get("message_count") or "?"
+            msgs = v.get("messages") or v.get("message_count") or 0
             dur = v.get("duration_seconds") or 0
             h, m = divmod(dur // 60, 60)
-            print(f"  {v.get('vod_id')}  {v.get('streamer','')}  {v.get('upload_date','')}  "
-                  f"{msgs:,} msgs  {h}h{m:02d}m")
+            msgs_str = f"{msgs:,}" if isinstance(msgs, int) else str(msgs)
+            print(f"  {_EMBER}{v.get('vod_id')}{_RST}  {_SILVER}{v.get('streamer','')}{_RST}  "
+                  f"{_DIM}{v.get('upload_date','')}{_RST}  "
+                  f"{msgs_str} msgs  {h}h{m:02d}m")
         return
     if "peaks" in result:
         if "total_matches" in result:
-            print(f"  {result['total_matches']:,} matches")
+            print(f"  {_SILVER}{result['total_matches']:,} matches{_RST}")
         for p in result["peaks"]:
-            seg = f"  {p.get('segment','')}" if p.get("segment") else ""
+            seg = f"  {_DIM}{p.get('segment','')}{_RST}" if p.get("segment") else ""
             rank = p.get("rank")
-            prefix = f"#{rank:2}" if rank is not None else "   "
-            print(f"  {prefix}  {p['timestamp']}  {p['count']:4} msgs{seg}")
+            prefix = f"{_CRIMSON}#{rank:2}{_RST}" if rank is not None else "   "
+            print(f"  {prefix}  {_EMBER}{p['timestamp']}{_RST}  {_SILVER}{p['count']:4}{_RST} msgs{seg}")
         return
     if "clips" in result:
         for c in result["clips"]:
             if "rank" in c:
-                print(f"  #{c['rank']:2}  {c['virality']:3}/100  {c['cut_window']}  "
-                      f"{c['mood']:<7}  {c['echo_label']:<12}  {c['reasoning']}")
+                score = c['virality']
+                sc = _CRIMSON if score >= 85 else _EMBER if score >= 60 else _DIM
+                print(f"  {_CRIMSON}#{c['rank']:2}{_RST}  {sc}{score:3}/100{_RST}  "
+                      f"{_EMBER}{c['cut_window']}{_RST}  "
+                      f"{_SILVER}{c['mood']:<7}{_RST}  {_DIM}{c['echo_label']:<12}{_RST}  "
+                      f"{_DIM}{c['reasoning']}{_RST}")
             else:
-                print(f"  {c.get('filename')}  {c.get('start')} - {c.get('end')}  "
-                      f"{c.get('score')}/100  {c.get('title')}")
+                score = c.get('score', 0) or 0
+                sc = _CRIMSON if score >= 85 else _EMBER if score >= 60 else _DIM
+                print(f"  {_SILVER}{c.get('filename')}{_RST}  "
+                      f"{_EMBER}{c.get('start')} - {c.get('end')}{_RST}  "
+                      f"{sc}{score}/100{_RST}  {_BONE}{c.get('title')}{_RST}")
                 if c.get("subtitles"):
-                    print(f"      subtitles -> {c['subtitles']}")
+                    print(f"      {_DIM}subtitles -> {c['subtitles']}{_RST}")
         art = result.get("artifacts", {})
         if art.get("siphon_report_md"):
-            print(f"  report → {art['siphon_report_md']}")
+            print(f"  {_DIM}report -> {art['siphon_report_md']}{_RST}")
         if result.get("output_dir"):
-            print(f"  output -> {result['output_dir']}")
+            print(f"  {_DIM}output -> {result['output_dir']}{_RST}")
         return
     if "tokens" in result:
         top = result["tokens"][:15]
-        print("  " + "  ".join(f"{t['word']}×{t['count']}" for t in top))
+        print("  " + "  ".join(f"{_EMBER}{t['word']}{_DIM}x{t['count']}{_RST}" for t in top))
         return
     # Fallback: compact JSON
     print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
@@ -1138,12 +1396,43 @@ def _parse_manual_export_args(rest: str) -> dict | None:
     }
 
 
+def _parse_manual_codex_args(rest: str) -> dict | None:
+    parser = argparse.ArgumentParser(prog="codex", add_help=False)
+    parser.add_argument("vod_id")
+    parser.add_argument("top", nargs="?", type=int, default=5)
+    parser.add_argument("--from-top", type=int, default=15)
+    parser.add_argument("--pad", type=int, default=10)
+    parser.add_argument("--vertical", action="store_true")
+    parser.add_argument("--no-crawl", action="store_true")
+    parser.add_argument("--no-zoom", action="store_true")
+    parser.add_argument("--subtitles", "--speech-subtitles", dest="speech_subtitles", action="store_true")
+    parser.add_argument("--logo", default=None)
+    parser.add_argument("--raw", action="store_true")
+    try:
+        ns = parser.parse_args(shlex.split(rest))
+    except (SystemExit, ValueError):
+        return None
+    return {
+        "vod_id": ns.vod_id,
+        "top": ns.top,
+        "from_top": ns.from_top,
+        "pad": ns.pad,
+        "drama_zoom": not ns.no_zoom,
+        "chat_crawl": not ns.no_crawl,
+        "speech_subtitles": ns.speech_subtitles,
+        "vertical": ns.vertical,
+        "logo": ns.logo,
+        "raw": ns.raw,
+    }
+
+
 _MANUAL_MENU = [
     ("list", "show archived VODs"),
     ("fetch", "download/cache a VOD"),
     ("peaks", "raw peak density"),
     ("score", "Siphon virality scoring"),
     ("export", "cut top clips"),
+    ("codex", "Codex-style clips (drama zoom + crawl)"),
     ("window", "analyze timestamp window"),
     ("search", "regex search"),
     ("heatmap", "open heatmap PNG"),
@@ -1160,10 +1449,12 @@ def _menu_command_line(cmd: str) -> str:
         vod = input("vod url/id: ").strip()
         no_video = input("no-video? [y/N] ").strip().lower()
         return f"fetch {vod}" + (" no-video" if no_video in ("y", "yes") else "")
-    if cmd in ("peaks", "score", "export", "heatmap"):
-        vod = input("vod id: ").strip()
+    if cmd in ("peaks", "score", "export", "codex", "heatmap"):
+        vod = _pick_vod()
+        if not vod:
+            return ""
         top = ""
-        if cmd in ("peaks", "score", "export"):
+        if cmd in ("peaks", "score", "export", "codex"):
             top = input("top [Enter for default]: ").strip()
         line = f"{cmd} {vod}" + (f" {top}" if top else "")
         if cmd == "export":
@@ -1179,17 +1470,86 @@ def _menu_command_line(cmd: str) -> str:
                 sidecar = input("SRT only, no burn-in? [y/N] ").strip().lower()
                 if sidecar in ("y", "yes"):
                     line += " --subtitle-sidecar-only"
+        if cmd == "codex":
+            raw = input("raw mode (no effects)? [y/N] ").strip().lower()
+            if raw in ("y", "yes"):
+                line += " --raw"
+            else:
+                vertical = input("vertical 9:16? [y/N] ").strip().lower()
+                if vertical in ("y", "yes"):
+                    line += " --vertical"
         return line
     if cmd == "window":
-        vod = input("vod id: ").strip()
+        vod = _pick_vod()
+        if not vod:
+            return ""
         start = input("start timestamp: ").strip()
         dur = input("duration seconds [Enter for default]: ").strip()
         return f"window {vod} {start}" + (f" {dur}" if dur else "")
     if cmd == "search":
-        vod = input("vod id: ").strip()
+        vod = _pick_vod()
+        if not vod:
+            return ""
         pattern = input("pattern: ").strip()
         return f"search {vod} {pattern}"
     return cmd
+
+
+def _pick_vod() -> str | None:
+    """Arrow-key VOD selector. Returns vod_id string, or None on cancel/empty."""
+    if not sys.stdin.isatty():
+        return input("vod id: ").strip() or None
+    try:
+        import msvcrt
+    except ImportError:
+        return input("vod id: ").strip() or None
+
+    vods = tool_list_vods().get("vods", [])
+    if not vods:
+        print(f"  {_DIM}(no VODs archived — use fetch first){_RST}")
+        return None
+    # Newest first
+    vods = list(reversed(vods))
+
+    idx = 0
+    n = len(vods)
+    print(f"\n{_DIM}Select VOD (↑/↓, Enter, Esc to cancel):{_RST}")
+    while True:
+        for i, v in enumerate(vods):
+            vid = v.get("vod_id", "?")
+            streamer = v.get("streamer", "") or ""
+            date = v.get("upload_date", "") or ""
+            msgs = v.get("messages") or v.get("message_count") or 0
+            dur = v.get("duration_seconds") or 0
+            h, m = divmod(dur // 60, 60)
+            msgs_s = f"{msgs:,}" if isinstance(msgs, int) else str(msgs)
+            if i == idx:
+                print(f"\r\033[K{_CRIMSON}▸ {_EMBER}{vid}  {_SILVER}{streamer:<12}{_RST}"
+                      f"{_DIM}{date}  {msgs_s} msgs  {h}h{m:02d}m{_RST}")
+            else:
+                print(f"\r\033[K  {_DIM}{vid}  {streamer:<12}{date}  "
+                      f"{msgs_s} msgs  {h}h{m:02d}m{_RST}")
+        print(f"\033[{n}A", end="", flush=True)
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):
+            key = msvcrt.getwch()
+            if key == "H":
+                idx = (idx - 1) % n
+            elif key == "P":
+                idx = (idx + 1) % n
+            continue
+        if ch == "\r":
+            print(f"\033[{n}B", end="")
+            selected = vods[idx]
+            vid = selected.get("vod_id", "?")
+            streamer = selected.get("streamer", "") or ""
+            date = selected.get("upload_date", "") or ""
+            print(f"  {_SILVER}selected:{_RST} {_EMBER}{vid}{_RST} "
+                  f"{_DIM}({streamer} {date}){_RST}")
+            return str(vid)
+        if ch == "\x1b":
+            print(f"\033[{n}B", end="")
+            return None
 
 
 def _arrow_menu() -> str | None:
@@ -1201,11 +1561,13 @@ def _arrow_menu() -> str | None:
         return None
 
     idx = 0
-    print("\nUse ↑/↓, Enter to select, Esc to cancel.")
+    print(f"\n{_DIM}Use ↑/↓, Enter to select, Esc to cancel.{_RST}")
     while True:
         for i, (cmd, desc) in enumerate(_MANUAL_MENU):
-            marker = ">" if i == idx else " "
-            print(f"\r\033[K{marker} {cmd:<8} {desc}")
+            if i == idx:
+                print(f"\r\033[K{_CRIMSON}▸ {cmd:<12}{_SILVER}{desc}{_RST}")
+            else:
+                print(f"\r\033[K  {_DIM}{cmd:<12}{desc}{_RST}")
         print(f"\033[{len(_MANUAL_MENU)}A", end="", flush=True)
         ch = msvcrt.getwch()
         if ch in ("\x00", "\xe0"):
@@ -1262,25 +1624,17 @@ def manual_repl(args=None) -> None:
     No-AI fallback REPL. Dispatches typed commands directly to TOOL_FUNCS.
     Default mode. Can summon the AI agent explicitly with `agent` / `symbot`.
     """
-    print("~~ Symbiote MANUAL MODE — direct tool dispatch, no AI ~~")
-    print("Commands:")
-    print("  fetch <url|id> [no-video]   download chat (+ video unless 'no-video')")
-    print("  list                         show archived VODs")
-    print("  peaks <id> [top=15]          raw peak density")
-    print("  score <id> [top=15]          Siphon virality scoring")
-    print("  export <id> [top=5] [--subtitles] cut top clips to Desktop/VODClips")
-    print("  window <id> <start> [dur=60] analyze a timestamp window")
-    print("  search <id> <pattern>        regex search chat")
-    print("  heatmap <id>                 open heatmap PNG")
-    print("  agent                         summon Symbot")
-    print("  help   quit                   press ↑/↓ for menu")
+    print(_SYMBIOTE_BANNER)
+    print(f"  {_SILVER}MANUAL MODE{_RST} {_DIM}— direct tool dispatch, no AI{_RST}")
+    print(f"  {_DIM}type {_CRIMSON}help{_DIM} for commands, {_CRIMSON}agent{_DIM} to summon Symbot{_RST}")
+    print(f"  {_DIM}press {_EMBER}↑/↓{_DIM} at empty prompt for interactive menu{_RST}")
     print()
 
     while True:
         try:
-            line = _manual_input("manual> ").strip()
+            line = _manual_input(_VAMP_PROMPT).strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nbye.")
+            print(f"\n{_BLOOD}the symbiote detaches.{_RST}")
             return
         if not line:
             continue
@@ -1290,15 +1644,27 @@ def manual_repl(args=None) -> None:
         rest = parts[1] if len(parts) > 1 else ""
 
         if cmd in ("exit", "quit"):
-            print("bye.")
+            print(f"{_BLOOD}the symbiote detaches.{_RST}")
             return
         elif cmd == "help":
-            print("  fetch <url|id> [no-video]  |  list  |  peaks <id> [top]")
-            print("  score <id> [top]           |  export <id> [top] [--subtitles]")
-            print("  export subtitle flags: --subtitle-model tiny|base|small, --subtitle-font-size 28, --subtitle-sidecar-only")
-            print("  window <id> <start> [dur]  |  search <id> <pattern>")
-            print("  heatmap <id>")
-            print("  agent                      |  quit")
+            print(f"\n  {_BLOOD}{'=' * 50}{_RST}")
+            print(f"  {_SILVER}{_FANG}SYMBIOTE COMMANDS{_RST}")
+            print(f"  {_BLOOD}{'=' * 50}{_RST}")
+            print(_vamp_cmd("fetch <url|id> [no-video]", "download chat + video"))
+            print(_vamp_cmd("list", "show archived VODs"))
+            print(_vamp_cmd("peaks <id> [top=15]", "raw peak density"))
+            print(_vamp_cmd("score <id> [top=15]", "Siphon virality scoring"))
+            print(_vamp_cmd("export <id> [top=5]", "cut top clips"))
+            print(f"  {_DIM}  flags: --subtitles --subtitle-model tiny --subtitle-font-size 28{_RST}")
+            print(_vamp_cmd("codex <id> [top=5] [--raw]", "Codex clips (zoom + crawl)"))
+            print(f"  {_DIM}  flags: --vertical --no-crawl --no-zoom --raw{_RST}")
+            print(_vamp_cmd("window <id> <start> [dur=60]", "analyze timestamp window"))
+            print(_vamp_cmd("search <id> <pattern>", "regex search chat"))
+            print(_vamp_cmd("heatmap <id>", "open heatmap PNG"))
+            print(f"  {_BLOOD}{'─' * 50}{_RST}")
+            print(_vamp_cmd("agent", "summon Symbot (AI mode)"))
+            print(_vamp_cmd("quit", "leave"))
+            print(f"  {_BLOOD}{'=' * 50}{_RST}\n")
         elif cmd in ("agent", "symbot", "summon"):
             _agent_repl(args)
             return
@@ -1310,9 +1676,9 @@ def manual_repl(args=None) -> None:
             kwargs: dict = {"vod": argv[0]}
             if "no-video" in argv[1:]:
                 kwargs["download_video"] = False
-            _print_tool_result(run_tool("fetch_vod", kwargs))
+            _run_tool_with_spinner("fetch_vod", kwargs)
         elif cmd == "list":
-            _print_tool_result(run_tool("list_vods", {}))
+            _run_tool_with_spinner("list_vods", {})
         elif cmd == "peaks":
             argv = rest.split()
             if not argv:
@@ -1321,7 +1687,7 @@ def manual_repl(args=None) -> None:
             kwargs = {"vod_id": argv[0]}
             if len(argv) > 1 and argv[1].isdigit():
                 kwargs["top"] = int(argv[1])
-            _print_tool_result(run_tool("get_peaks", kwargs))
+            _run_tool_with_spinner("get_peaks", kwargs)
         elif cmd in ("score", "virality"):
             argv = rest.split()
             if not argv:
@@ -1330,7 +1696,7 @@ def manual_repl(args=None) -> None:
             kwargs = {"vod_id": argv[0]}
             if len(argv) > 1 and argv[1].isdigit():
                 kwargs["top"] = int(argv[1])
-            _print_tool_result(run_tool("get_virality", kwargs))
+            _run_tool_with_spinner("get_virality", kwargs)
         elif cmd == "export":
             if not rest.strip():
                 print("  usage: export <vod_id> [top] [--subtitles] [--subtitle-model tiny] [--subtitle-font-size 28]")
@@ -1339,7 +1705,16 @@ def manual_repl(args=None) -> None:
             if kwargs is None:
                 print("  usage: export <vod_id> [top] [--subtitles] [--subtitle-model tiny] [--subtitle-font-size 28]")
                 continue
-            _print_tool_result(run_tool("export_top_clips", kwargs))
+            _run_tool_with_spinner("export_top_clips", kwargs)
+        elif cmd == "codex":
+            if not rest.strip():
+                print("  usage: codex <vod_id> [top] [--vertical] [--no-crawl] [--no-zoom] [--raw]")
+                continue
+            kwargs = _parse_manual_codex_args(rest)
+            if kwargs is None:
+                print("  usage: codex <vod_id> [top] [--vertical] [--no-crawl] [--no-zoom] [--raw]")
+                continue
+            _run_tool_with_spinner("export_codex_clips", kwargs)
         elif cmd == "window":
             argv = rest.split()
             if len(argv) < 2:
@@ -1348,19 +1723,19 @@ def manual_repl(args=None) -> None:
             kwargs = {"vod_id": argv[0], "start": argv[1]}
             if len(argv) > 2 and argv[2].isdigit():
                 kwargs["duration"] = int(argv[2])
-            _print_tool_result(run_tool("analyze_window", kwargs))
+            _run_tool_with_spinner("analyze_window", kwargs)
         elif cmd == "search":
             argv = rest.split(None, 1)
             if len(argv) < 2:
                 print("  usage: search <vod_id> <pattern>")
                 continue
-            _print_tool_result(run_tool("search_chat", {"vod_id": argv[0], "pattern": argv[1]}))
+            _run_tool_with_spinner("search_chat", {"vod_id": argv[0], "pattern": argv[1]})
         elif cmd == "heatmap":
             argv = rest.split()
             if not argv:
                 print("  usage: heatmap <vod_id>")
                 continue
-            _print_tool_result(run_tool("open_heatmap", {"vod_id": argv[0]}))
+            _run_tool_with_spinner("open_heatmap", {"vod_id": argv[0]})
         else:
             print(f"  Unknown command {cmd!r}. Type 'help'.")
 

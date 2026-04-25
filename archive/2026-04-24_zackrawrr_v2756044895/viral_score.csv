@@ -1,0 +1,8 @@
+rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,echo_label,velocity_x,magnitude,segment,reasoning
+1,67,1:00:00,3600,3587,3834,0:59:47 → 1:03:54,HYPE,Story,1.9×,1.00,Just Chatting,1.9× velocity · HYPE (0.45) · Story echo 0.82 · p100 volume
+2,66,0:47:00,2820,2776,2965,0:46:16 → 0:49:25,FUNNY,Story,3.5×,0.68,Just Chatting,3.5× velocity · FUNNY (0.50) · Story echo 0.94 · p68 volume
+3,64,0:55:00,3300,3282,3437,0:54:42 → 0:57:17,FUNNY,Lingering,2.1×,0.99,Just Chatting,2.2× velocity · FUNNY (0.62) · Lingering echo 0.46 · p99 volume
+4,57,1:14:00,4440,4353,4522,1:12:33 → 1:15:22,FUNNY,Lingering,1.4×,0.82,Just Chatting,1.4× velocity · FUNNY (0.64) · Lingering echo 0.55 · p82 volume
+5,51,0:51:00,3060,3046,3226,0:50:46 → 0:53:46,FUNNY,Story,1.4×,0.68,Just Chatting,1.4× velocity · FUNNY (0.41) · Story echo 0.67 · p68 volume
+6,48,1:11:00,4260,4228,4336,1:10:28 → 1:12:16,SHOCK,Story,1.5×,0.71,Just Chatting,1.5× velocity · SHOCK (0.36) · Story echo 0.89 · p70 volume
+7,48,1:18:00,4680,4659,4808,1:17:39 → 1:20:08,HYPE,Story,1.1×,0.65,Just Chatting,1.1× velocity · HYPE (0.42) · Story echo 0.70 · p64 volume

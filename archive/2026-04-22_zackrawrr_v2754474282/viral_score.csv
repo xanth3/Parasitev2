@@ -1,10 +1,8 @@
 rank,virality,timestamp,cut_window,mood,echo_label,velocity_x,magnitude,segment,reasoning
-1,70,1:33:00,1:32:54 → 1:35:45,FUNNY,Story,1.8×,1.00,Just Chatting,1.8× velocity · FUNNY (0.53) · Story echo 0.88 · p99 volume
-2,69,2:39:00,2:38:27 → 2:41:27,FUNNY,Story,2.2×,0.90,Just Chatting,2.2× velocity · FUNNY (0.65) · Story echo 0.67 · p89 volume
-3,68,2:11:00,2:10:28 → 2:14:00,HYPE,Story,2.0×,0.91,Just Chatting,2.0× velocity · HYPE (0.68) · Story echo 1.01 · p91 volume
-4,68,2:55:00,2:53:04 → 2:56:23,FUNNY,Story,1.7×,0.98,Just Chatting,1.7× velocity · FUNNY (0.60) · Story echo 0.90 · p98 volume
-5,68,2:57:00,2:56:53 → 2:59:37,FUNNY,Story,1.5×,1.00,Just Chatting,1.5× velocity · FUNNY (0.60) · Story echo 0.86 · p100 volume
-6,67,1:58:00,1:57:11 → 2:00:11,FUNNY,Story,1.9×,0.96,Just Chatting,1.9× velocity · FUNNY (0.48) · Story echo 0.75 · p95 volume
-7,66,2:01:00,2:00:21 → 2:03:14,FUNNY,Story,1.5×,1.00,Just Chatting,1.5× velocity · FUNNY (0.73) · Story echo 0.63 · p100 volume
-8,66,3:13:00,3:10:25 → 3:14:47,FUNNY,Story,1.4×,0.98,Just Chatting,1.4× velocity · FUNNY (0.79) · Story echo 0.75 · p97 volume
-9,59,2:04:00,2:03:56 → 2:04:26,SHOCK,Story,1.2×,0.90,Just Chatting,1.2× velocity · SHOCK (0.50) · Story echo 0.61 · p90 volume
+1,69,1:33:00,1:32:54 → 1:35:45,FUNNY,Story,1.8×,1.00,Just Chatting,1.8× velocity · FUNNY (0.49) · Story echo 0.88 · p99 volume
+2,69,2:39:00,2:38:27 → 2:41:27,FUNNY,Story,2.2×,0.90,Just Chatting,2.2× velocity · FUNNY (0.61) · Story echo 0.67 · p89 volume
+3,68,2:11:00,2:10:28 → 2:14:00,HYPE,Story,2.0×,0.91,Just Chatting,2.0× velocity · HYPE (0.67) · Story echo 1.01 · p91 volume
+4,66,1:58:00,1:57:11 → 2:00:11,FUNNY,Story,1.9×,0.96,Just Chatting,1.9× velocity · FUNNY (0.46) · Story echo 0.75 · p95 volume
+5,66,2:01:00,2:00:21 → 2:03:14,FUNNY,Story,1.5×,1.00,Just Chatting,1.5× velocity · FUNNY (0.69) · Story echo 0.63 · p100 volume
+6,66,3:13:00,3:10:25 → 3:14:47,FUNNY,Story,1.4×,0.98,Just Chatting,1.4× velocity · FUNNY (0.73) · Story echo 0.75 · p97 volume
+7,58,2:59:00,2:57:00 → 2:59:37,HYPE,Story,0.9×,0.88,Just Chatting,0.9× velocity · HYPE (0.49) · Story echo 0.68 · p87 volume

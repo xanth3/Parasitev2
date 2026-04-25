@@ -9,13 +9,14 @@ stream without watching it.
 
 ## Scripts
 
-Four standalone scripts plus one agent entrypoint. No package.
+Five standalone scripts plus one agent entrypoint. No package.
 
 - [fetch_chat.py](fetch_chat.py) — pulls the full chat from a VOD URL/ID via Twitch's public GraphQL API and writes a TwitchDownloader-compatible `chat_<id>.json`.
 - [heatmap.py](heatmap.py) — consumes that JSON, emits a PNG histogram, a top-N terminal table, and `peaks.csv`.
 - [peaks_detail.py](peaks_detail.py) — expands each peak into a Markdown report with top tokens and sampled messages.
 - [viral_score.py](viral_score.py) — **Siphon virality engine.** Consumes `chat.json` + `peaks.csv`, scores each peak on a 0–100 Virality Index, computes smart-padded cut windows, and writes `viral_score.csv` + `siphon_report.md`. See *Siphon virality engine* section below.
-- [symbiote.py](symbiote.py) — the Symbiote agent. REPL + Gemini function-calling loop. Imports from the four scripts above. Also has a **Manual Mode** fallback — see below.
+- [clipper.py](clipper.py) — **Codex content manager.** Post-processes Siphon clips with visual effects: drama zoom (face punch-in on SHOCK/DRAMA), Thumerian chat crawl (crimson/silver scrolling overlay on HYPE/FUNNY), speech subtitles, logo branding, and optional 9:16 vertical secondary output. See *Codex content manager* section below.
+- [symbiote.py](symbiote.py) — the Symbiote agent. REPL + Gemini function-calling loop. Imports from the scripts above. Also has a **Manual Mode** fallback — see below.
 - [requirements.txt](requirements.txt) — `matplotlib`, `requests`, `google-genai`. Everything else is stdlib.
 
 ## Why fetch_chat.py exists
@@ -78,6 +79,9 @@ python viral_score.py archive/<dir>/chat.json --peaks archive/<dir>/peaks.csv \
     --info archive/<dir>/info.json
 python export_top_clips.py archive/<dir>/viral_score.csv \
     --chat archive/<dir>/chat.json --video path/to/vod.mp4 --dry-run
+python clipper.py archive/<dir>/viral_score.csv \
+    --chat archive/<dir>/chat.json --video path/to/vod.mp4 \
+    --drama-zoom --chat-crawl --vertical --dry-run
 ```
 
 **Why Gemini:** the project ships to users, and Gemini 2.5 Flash has a free tier — no payment method required. Anthropic's API is pay-as-you-go.
@@ -123,6 +127,7 @@ Seven tools exposed to Gemini via function-declarations in `symbiote.py`:
 | `get_peaks` | Bin chat into buckets, return top-N peaks with HH:MM:SS + chapter label. Raw density only — no scoring. |
 | `get_virality` | **Siphon engine.** Score peaks 0–100, smart-pad cut windows, classify mood, return reasoning. Use this for clip decisions. Writes `viral_score.csv` + `siphon_report.md`. |
 | `export_top_clips` | Cut the best Siphon moments to MP4, write JSON sidecars, upload copy, manifest, and optional thumbnails in `~/Desktop/VODClips`. Prefers local files in `~/Desktop/VODs`, falls back to Twitch VOD URL. |
+| `export_codex_clips` | Codex-styled export: drama zoom on SHOCK/DRAMA, Thumerian chat crawl on HYPE/FUNNY, speech subtitles, logo branding, optional 9:16 vertical secondary. Same input pipeline as `export_top_clips`. |
 | `analyze_window` | Given a timestamp + duration, return top tokens and sampled messages. Accepts `H:MM:SS`, `H:MM`, or raw seconds. |
 | `search_chat` | Regex-search the chat. Returns total matches + density peaks. |
 | `open_heatmap` | `os.startfile` the VOD's heatmap.png (regenerates via `heatmap.py` if missing). |
@@ -166,6 +171,44 @@ Baseline guard: `max(mean(m-5..m-1), 0.3 × global_median)`. First 5 minutes ski
 - `score_from_paths(chat_path, peaks_path, info_path=None) → list[dict]`
 - `write_csv(scored, out_path)` / `write_md(scored, comments, out_path, chat_name)`
 
+## Codex content manager (`clipper.py`)
+
+Post-processes Siphon-scored clips with visual effects for the Codex channel aesthetic. Primary output preserves the source video's native aspect ratio. Vertical 9:16 is an optional secondary output via `--vertical`.
+
+**Effects:**
+
+| Effect | Trigger | Description |
+| --- | --- | --- |
+| Drama Zoom | SHOCK/DRAMA mood, virality > 85 | Face-detection punch-in using Haar cascades + `compute_face_focus_crop`. Same trim/crop/scale/concat segmentation as export_top_clips shock_cam. |
+| Thumerian Chat Crawl | HYPE/FUNNY mood | ASS `\move()` scrolling overlay — crimson primary (`&H003232FF` BGR), silver glow outline (`&H00C0C0C0`). Rate-limited to 3 concurrent, 2/sec. |
+| Speech Subtitles | `--speech-subtitles` flag | Reuses `transcribe_clip_to_srt` from export_top_clips. Adjusted MarginV for vertical. |
+| Logo/Branding | `--logo` flag | PNG watermark via ffmpeg overlay filter. Top-right default. |
+| Vertical 9:16 | `--vertical` flag | Split-screen: content crop top 60%, camera crop bottom 40%. Uses `detect_streamer_camera_box` for auto-detection. |
+| Raw Mode | `--raw` flag | Zero post-processing — stream copy (`ffmpeg -c copy`), no effects, no re-encode. Fastest clean cuts. |
+
+**CLI theme:** Vampiric/dark aesthetic — ANSI 256-color palette (blood red, crimson, ember, silver, bone), threaded `BloodDrip` spinner animation, ASCII art banner, mood badges, colored score tiers.
+
+**Usage:**
+```bash
+# Codex mode (all effects)
+python clipper.py archive/<dir>/viral_score.csv \
+    --chat archive/<dir>/chat.json \
+    --video path/to/vod.mp4 \
+    --top 5 --drama-zoom --chat-crawl \
+    --vertical --dry-run
+
+# Raw mode (clean cuts, no effects)
+python clipper.py archive/<dir>/viral_score.csv \
+    --chat archive/<dir>/chat.json \
+    --video path/to/vod.mp4 \
+    --top 5 --raw --dry-run
+```
+
+**Public API for `symbiote.py`:**
+- `export_codex_clips(args: argparse.Namespace) → dict` — main entry point
+- `should_apply_drama_zoom(signals, row, min_score, moods) → bool`
+- `write_chat_crawl_ass(comments, start, end, out_path, args, play_res_x, play_res_y) → Path`
+
 ## Manual Mode
 
 Symbiote starts as a direct tool REPL by default — no AI in the loop. Type `agent`
@@ -185,6 +228,7 @@ list                         — show archived VODs
 peaks <id> [top=15]          — raw peak density table
 score <id> [top=15]          — Siphon virality scoring
 export <id> [top=5]          — cut top clips to Desktop/VODClips
+codex <id> [top=5] [--raw]   — Codex-style clips (drama zoom + crawl), or raw clean cuts
 window <id> <start> [dur=60] — analyze a timestamp window
 search <id> <pattern>        — regex search chat
 heatmap <id>                 — open heatmap PNG

@@ -1,26 +1,26 @@
 # Siphon Report — chat.json
 
-Scored **9** clip(s)  
+Scored **7** clip(s)  
 Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #1 · 70/100 · 1:33:00 · FUNNY *(merged #4, #5)*
+## #1 · 69/100 · 1:33:00 · FUNNY *(merged #4, #5)*
 
 **Cut window:** `1:32:54 → 1:35:45`  
-**Reasoning:** 1.8× velocity · FUNNY (0.53) · Story echo 0.88 · p99 volume  
+**Reasoning:** 1.8× velocity · FUNNY (0.49) · Story echo 0.88 · p99 volume  
 **Segment:** Just Chatting  
 
 | Pillar | Score |
 |---|---|
 | Velocity 1.8× | 19 |
-| Mood (FUNNY) | 100 |
+| Mood (FUNNY) | 97 |
 | Echo (Story) | 100 |
 | Magnitude factor | 1.00 |
 
 **Top mood tokens**
 
-`LUL` ×104 · `LMAO` ×39 · `KEKW` ×19 · `OMEGALUL` ×10 · `LMFAO` ×9 · `ICANT` ×4 · `HAHA` ×3 · `XD` ×3 · `LULW` ×3 · `DEAD` ×2
+`LUL` ×104 · `LMAO` ×39 · `KEKW` ×19 · `OMEGALUL` ×10 · `LMFAO` ×9 · `ICANT` ×4 · `HAHA` ×3 · `XD` ×3 · `LULW` ×3 · `DEAD` ×2 · `BALD` ×1
 
 **Sample messages**
 
@@ -42,7 +42,7 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 ## #2 · 69/100 · 2:39:00 · FUNNY
 
 **Cut window:** `2:38:27 → 2:41:27`  
-**Reasoning:** 2.2× velocity · FUNNY (0.65) · Story echo 0.67 · p89 volume  
+**Reasoning:** 2.2× velocity · FUNNY (0.61) · Story echo 0.67 · p89 volume  
 **Segment:** Just Chatting  
 
 | Pillar | Score |
@@ -54,7 +54,7 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 **Top mood tokens**
 
-`LUL` ×99 · `KEKW` ×28 · `LMAO` ×21 · `ICANT` ×12 · `XD` ×6 · `LMFAO` ×4 · `HAHA` ×3 · `LULW` ×3 · `OMEGALUL` ×2 · `DEAD` ×1
+`LUL` ×99 · `KEKW` ×28 · `LMAO` ×21 · `ICANT` ×12 · `XD` ×6 · `LMFAO` ×4 · `HAHA` ×3 · `LULW` ×3 · `OMEGALUL` ×2 · `BALD` ×1 · `DEAD` ×1
 
 **Sample messages**
 
@@ -76,7 +76,7 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 ## #3 · 68/100 · 2:11:00 · HYPE *(merged #10, #6)*
 
 **Cut window:** `2:10:28 → 2:14:00`  
-**Reasoning:** 2.0× velocity · HYPE (0.68) · Story echo 1.01 · p91 volume  
+**Reasoning:** 2.0× velocity · HYPE (0.67) · Story echo 1.01 · p91 volume  
 **Segment:** Just Chatting  
 
 | Pillar | Score |
@@ -88,7 +88,7 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 **Top mood tokens**
 
-`BASED` ×53 · `W` ×46 · `POGCHAMP` ×2 · `POGGERS` ×1 · `POG` ×1 · `WW` ×1 · `INSANE` ×1
+`BASED` ×53 · `W` ×46 · `BIG` ×8 · `POGCHAMP` ×2 · `POGGERS` ×1 · `POG` ×1 · `CINEMA` ×1 · `WW` ×1 · `AURA` ×1 · `INSANE` ×1
 
 **Sample messages**
 
@@ -107,90 +107,22 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #4 · 68/100 · 2:55:00 · FUNNY *(merged #13, #7)*
-
-**Cut window:** `2:53:04 → 2:56:23`  
-**Reasoning:** 1.7× velocity · FUNNY (0.60) · Story echo 0.90 · p98 volume  
-**Segment:** Just Chatting  
-
-| Pillar | Score |
-|---|---|
-| Velocity 1.7× | 18 |
-| Mood (FUNNY) | 100 |
-| Echo (Story) | 100 |
-| Magnitude factor | 0.98 |
-
-**Top mood tokens**
-
-`LUL` ×144 · `KEKW` ×41 · `LMAO` ×37 · `XD` ×7 · `HAHA` ×6 · `ICANT` ×6 · `LMFAO` ×5 · `OMEGALUL` ×2 · `DEAD` ×1 · `LULW` ×1
-
-**Sample messages**
-
-| +mm:ss | user | message |
-|---|---|---|
-| +00:00 | Nirvired | Looking |
-| +00:25 | GloriousStone_ | PRAISE THE QUEEN |
-| +00:44 | darkest_knight9999 | Rare Xbox W |
-| +01:03 | SpicyCaramelDurian | better be a woman than  a fake woman |
-| +01:27 | gamingguerilla771 | Cinema |
-| +01:43 | impulsivelytentativ3 | hahahahahaha |
-| +02:00 | stackxz9 | true |
-| +02:19 | r1ck_james69 | based |
-| +02:36 | 1cet33 | LO |
-| +02:55 | Airborn009 | based |
-
----
-
-## #5 · 68/100 · 2:57:00 · FUNNY *(merged #1, #3, #15)*
-
-**Cut window:** `2:56:53 → 2:59:37`  
-**Reasoning:** 1.5× velocity · FUNNY (0.60) · Story echo 0.86 · p100 volume  
-**Segment:** Just Chatting  
-
-| Pillar | Score |
-|---|---|
-| Velocity 1.5× | 13 |
-| Mood (FUNNY) | 100 |
-| Echo (Story) | 100 |
-| Magnitude factor | 1.00 |
-
-**Top mood tokens**
-
-`LUL` ×113 · `LMAO` ×31 · `KEKW` ×21 · `XD` ×9 · `HAHA` ×7 · `ICANT` ×4 · `OMEGALUL` ×4 · `LMFAO` ×2 · `DEAD` ×1 · `LULW` ×1
-
-**Sample messages**
-
-| +mm:ss | user | message |
-|---|---|---|
-| +00:00 | elcapitan209 | 😂😂 |
-| +00:18 | ValyrianScythe | om wtf |
-| +00:37 | teis05 | CINEMA |
-| +00:51 | 0xkelly | NOT WRONG... |
-| +01:07 | happynerdsyt | That's pretty good |
-| +01:23 | UltraCherry | lol |
-| +01:42 | Norwegian_Dan | LUL LUL LUL |
-| +01:58 | RawKnee | Clap |
-| +02:14 | stereojunkie | That was awesome |
-| +02:29 | youfounddeez | They all left |
-
----
-
-## #6 · 67/100 · 1:58:00 · FUNNY
+## #4 · 66/100 · 1:58:00 · FUNNY
 
 **Cut window:** `1:57:11 → 2:00:11`  
-**Reasoning:** 1.9× velocity · FUNNY (0.48) · Story echo 0.75 · p95 volume  
+**Reasoning:** 1.9× velocity · FUNNY (0.46) · Story echo 0.75 · p95 volume  
 **Segment:** Just Chatting  
 
 | Pillar | Score |
 |---|---|
 | Velocity 1.9× | 22 |
-| Mood (FUNNY) | 95 |
+| Mood (FUNNY) | 91 |
 | Echo (Story) | 100 |
 | Magnitude factor | 0.96 |
 
 **Top mood tokens**
 
-`LUL` ×62 · `LMAO` ×11 · `KEKW` ×11 · `LMFAO` ×5 · `XD` ×3 · `OMEGALUL` ×2 · `HAHA` ×2 · `CLUELESS` ×1 · `DEAD` ×1 · `ICANT` ×1
+`LUL` ×62 · `LMAO` ×11 · `KEKW` ×11 · `LMFAO` ×5 · `XD` ×3 · `OMEGALUL` ×2 · `HAHA` ×2 · `CLUELESS` ×1 · `DEAD` ×1 · `4HEAD` ×1 · `ICANT` ×1
 
 **Sample messages**
 
@@ -209,10 +141,10 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #7 · 66/100 · 2:01:00 · FUNNY
+## #5 · 66/100 · 2:01:00 · FUNNY
 
 **Cut window:** `2:00:21 → 2:03:14`  
-**Reasoning:** 1.5× velocity · FUNNY (0.73) · Story echo 0.63 · p100 volume  
+**Reasoning:** 1.5× velocity · FUNNY (0.69) · Story echo 0.63 · p100 volume  
 **Segment:** Just Chatting  
 
 | Pillar | Score |
@@ -224,7 +156,7 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 **Top mood tokens**
 
-`LUL` ×54 · `KEKW` ×18 · `LMAO` ×13 · `XD` ×4 · `DEAD` ×3 · `LMFAO` ×2 · `ICANT` ×2 · `LULW` ×1 · `HAHA` ×1 · `OMEGALUL` ×1
+`LUL` ×54 · `KEKW` ×18 · `LMAO` ×13 · `XD` ×4 · `DEAD` ×3 · `BALD` ×2 · `LMFAO` ×2 · `ICANT` ×2 · `LULW` ×1 · `HAHA` ×1 · `JEBAITED` ×1 · `OMEGALUL` ×1
 
 **Sample messages**
 
@@ -243,10 +175,10 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #8 · 66/100 · 3:13:00 · FUNNY *(merged #11, #8)*
+## #6 · 66/100 · 3:13:00 · FUNNY *(merged #11, #8)*
 
 **Cut window:** `3:10:25 → 3:14:47`  
-**Reasoning:** 1.4× velocity · FUNNY (0.79) · Story echo 0.75 · p97 volume  
+**Reasoning:** 1.4× velocity · FUNNY (0.73) · Story echo 0.75 · p97 volume  
 **Segment:** Just Chatting  
 
 | Pillar | Score |
@@ -258,7 +190,7 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 **Top mood tokens**
 
-`LUL` ×238 · `LMAO` ×43 · `KEKW` ×36 · `LMFAO` ×15 · `XD` ×12 · `ICANT` ×9 · `OMEGALUL` ×6 · `HAHA` ×6 · `DEAD` ×2 · `CLUELESS` ×1 · `LULW` ×1
+`LUL` ×238 · `LMAO` ×43 · `KEKW` ×36 · `LMFAO` ×15 · `XD` ×12 · `ICANT` ×9 · `OMEGALUL` ×6 · `HAHA` ×6 · `BALD` ×4 · `DEAD` ×2 · `CLUELESS` ×1 · `LULW` ×1
 
 **Sample messages**
 
@@ -277,34 +209,34 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #9 · 59/100 · 2:04:00 · SHOCK
+## #7 · 58/100 · 2:59:00 · HYPE
 
-**Cut window:** `2:03:56 → 2:04:26`  
-**Reasoning:** 1.2× velocity · SHOCK (0.50) · Story echo 0.61 · p90 volume  
+**Cut window:** `2:57:00 → 2:59:37`  
+**Reasoning:** 0.9× velocity · HYPE (0.49) · Story echo 0.68 · p87 volume  
 **Segment:** Just Chatting  
 
 | Pillar | Score |
 |---|---|
-| Velocity 1.2× | 5 |
-| Mood (SHOCK) | 100 |
-| Echo (Story) | 92 |
-| Magnitude factor | 0.90 |
+| Velocity 0.9× | 0 |
+| Mood (HYPE) | 98 |
+| Echo (Story) | 100 |
+| Magnitude factor | 0.88 |
 
 **Top mood tokens**
 
-`BRO` ×3 · `HUH` ×2 · `WTF` ×1 · `NAH` ×1 · `WHAT` ×1
+`CINEMA` ×169 · `W` ×13 · `POG` ×5 · `BASED` ×5 · `BIG` ×2 · `GOAT` ×2 · `WW` ×1 · `HYPE` ×1 · `POGGERS` ×1
 
 **Sample messages**
 
 | +mm:ss | user | message |
 |---|---|---|
-| +00:00 | Encriid | 180 pounds ? |
-| +00:02 | melechthewarlock | Mexico is poorer and fatter |
-| +00:04 | LumisYvs | om |
-| +00:06 | GodiePH | EZ |
-| +00:07 | dururup | even rich folks arent that fat in Asia |
-| +00:10 | KahzNA | victim weight |
-| +00:12 | FF__Nation | Dere tayking awey our soders |
-| +00:17 | emiliobadilio | Fat people are important how else can we identify our citizens |
-| +00:21 | SwitchBlue1337 | When is the stone cold gold arc ? |
-| +00:26 | Timmytim69r | huh |
+| +00:00 | mixersoldout | Cinema |
+| +00:14 | destructow1 | this is weird af man |
+| +00:32 | Zagubadu | LOL |
+| +00:46 | geogzy | =))) |
+| +01:02 | yabuddyinc13 | Let it ride.. |
+| +01:17 | elcapitan209 | of course |
+| +01:36 | zephyroffire | LOL |
+| +01:52 | Croatiaboi11 | Cinema |
+| +02:07 | stereojunkie | That was awesome |
+| +02:22 | mrmeeseeks44 | dental care |
