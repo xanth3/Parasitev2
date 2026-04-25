@@ -860,8 +860,10 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
         }
         for p in scored[:top]
     ]
+    avg_score = round(sum(float(p["virality"]) for p in scored) / len(scored), 1) if scored else 0
     return {
         "vod_id": vod_id,
+        "average_score": avg_score,
         "clips": clips,
         "artifacts": {
             "viral_score_csv":   str(d / "viral_score.csv") if d else None,
@@ -900,6 +902,7 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
             })
             continue
         best = clips[0]
+        avg_score = scored.get("average_score")
         results.append({
             "vod_id": vod_id,
             "streamer": v.get("streamer"),
@@ -909,6 +912,7 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
             "duration_seconds": v.get("duration_seconds"),
             "rank": best.get("rank"),
             "virality": best.get("virality"),
+            "average_score": avg_score,
             "timestamp": best.get("timestamp"),
             "cut_window": best.get("cut_window"),
             "mood": best.get("mood"),
@@ -921,6 +925,58 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
     results.sort(key=lambda r: float(r.get("virality") or 0), reverse=True)
     return {
         "best_scores": results,
+        "errors": errors,
+        "vod_count": len(vods),
+        "scored_count": len(results),
+        "error_count": len(errors),
+    }
+
+
+def tool_average_scores(top=15, bin_size=60, limit=0):
+    """Score every archived VOD and return the average Siphon score per VOD."""
+    vods = tool_list_vods().get("vods", [])
+    if limit and limit > 0:
+        vods = vods[:limit]
+
+    results, errors = [], []
+    for v in vods:
+        vod_id = v.get("vod_id")
+        if not vod_id:
+            continue
+        scored = tool_get_virality(vod_id, top=top, bin_size=bin_size)
+        if scored.get("error"):
+            errors.append({
+                "vod_id": vod_id,
+                "streamer": v.get("streamer"),
+                "upload_date": v.get("upload_date"),
+                "error": scored["error"],
+            })
+            continue
+        clips = scored.get("clips") or []
+        if not clips:
+            errors.append({
+                "vod_id": vod_id,
+                "streamer": v.get("streamer"),
+                "upload_date": v.get("upload_date"),
+                "error": "No scored clips returned.",
+            })
+            continue
+        results.append({
+            "vod_id": vod_id,
+            "streamer": v.get("streamer"),
+            "title": v.get("title"),
+            "upload_date": v.get("upload_date"),
+            "messages": v.get("messages"),
+            "duration_seconds": v.get("duration_seconds"),
+            "average_score": scored.get("average_score"),
+            "best_score": clips[0].get("virality"),
+            "best_timestamp": clips[0].get("timestamp"),
+            "archive_dir": v.get("archive_dir"),
+        })
+
+    results.sort(key=lambda r: float(r.get("average_score") or 0), reverse=True)
+    return {
+        "average_scores": results,
         "errors": errors,
         "vod_count": len(vods),
         "scored_count": len(results),
@@ -1222,6 +1278,18 @@ TOOLS = [
         },
     },
     {
+        "name": "average_scores",
+        "description": "Score every archived VOD and return the average Siphon score per VOD, including VOD ID and upload date.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "top": {"type": "integer", "description": "How many peaks to score inside each VOD", "default": 15},
+                "bin_size": {"type": "integer", "description": "Heatmap bucket size in seconds", "default": 60},
+                "limit": {"type": "integer", "description": "Optional max number of archived VODs to scan; 0 means all", "default": 0},
+            },
+        },
+    },
+    {
         "name": "export_top_clips",
         "description": "Cut the top Siphon moments into MP4 clips and write upload metadata/copy to ~/Desktop/VODClips. Prefers local video files in ~/Desktop/VODs and falls back to the Twitch VOD URL.",
         "parameters": {
@@ -1323,6 +1391,7 @@ TOOL_FUNCS = {
     "get_peaks":     tool_get_peaks,
     "get_virality":  tool_get_virality,
     "best_scores":   tool_best_scores,
+    "average_scores": tool_average_scores,
     "export_top_clips": tool_export_top_clips,
     "export_codex_clips": tool_export_codex_clips,
     "analyze_window": tool_analyze_window,
@@ -1499,12 +1568,31 @@ def _print_tool_result(result: dict) -> None:
             print(f"  {_DIM}(no scored VODs found){_RST}")
         for r in scores:
             score = r.get("virality") or 0
+            avg = r.get("average_score")
             sc = _CRIMSON if score >= 85 else _EMBER if score >= 60 else _DIM
             print(f"  {sc}{score:3}/100{_RST}  {_EMBER}{r.get('vod_id')}{_RST}  "
                   f"{_SILVER}{r.get('timestamp')}{_RST}  {_DIM}{r.get('upload_date') or ''}{_RST}  "
                   f"{_SILVER}{r.get('mood') or 'UNKNOWN':<7}{_RST}  {r.get('cut_window') or ''}")
+            if avg is not None:
+                print(f"      {_SILVER}Avg. Score: {avg}{_RST}")
             if r.get("reasoning"):
                 print(f"      {_DIM}{r['reasoning']}{_RST}")
+        errors = result.get("errors") or []
+        if errors:
+            print(f"  {_DIM}{len(errors)} VODs skipped/errors{_RST}")
+            for e in errors[:5]:
+                print(f"      {_DIM}{e.get('vod_id')}: {e.get('error')}{_RST}")
+        return
+    if "average_scores" in result:
+        scores = result["average_scores"]
+        if not scores:
+            print(f"  {_DIM}(no average scores found){_RST}")
+        for r in scores:
+            avg = r.get("average_score") or 0
+            sc = _CRIMSON if avg >= 85 else _EMBER if avg >= 60 else _DIM
+            print(f"  {_EMBER}{r.get('vod_id')}{_RST}  {_DIM}{r.get('upload_date') or ''}{_RST}  "
+                  f"{sc}Avg. Score: {avg}{_RST}  "
+                  f"{_SILVER}Best: {r.get('best_score')}/100 @ {r.get('best_timestamp')}{_RST}")
         errors = result.get("errors") or []
         if errors:
             print(f"  {_DIM}{len(errors)} VODs skipped/errors{_RST}")
@@ -1534,6 +1622,8 @@ def _print_tool_result(result: dict) -> None:
                 print(f"    {_EMBER}{s.get('timestamp')}{_RST}  {_SILVER}{user}{_RST}: \"{body}\"")
         return
     if "clips" in result:
+        if "average_score" in result:
+            print(f"  {_SILVER}Avg. Score: {result['average_score']}{_RST}")
         for c in result["clips"]:
             if "rank" in c:
                 score = c['virality']
@@ -1631,7 +1721,6 @@ _MANUAL_MENU = [
     ("fetch", "download/cache a VOD"),
     ("peaks", "raw peak density"),
     ("score", "Siphon virality scoring"),
-    ("best", "best score per VOD"),
     ("export", "cut top clips"),
     ("codex", "Codex-style clips (drama zoom + crawl)"),
     ("window", "analyze timestamp window"),
@@ -1651,7 +1740,7 @@ def _menu_command_line(cmd: str) -> str:
         vod = input("vod url/id: ").strip()
         no_video = input("no-video? [y/N] ").strip().lower()
         return f"fetch {vod}" + (" no-video" if no_video in ("y", "yes") else "")
-    if cmd in ("peaks", "score", "export", "codex", "heatmap"):
+    if cmd in ("peaks", "export", "codex", "heatmap"):
         vod = _pick_vod()
         if not vod:
             return ""
@@ -1681,9 +1770,16 @@ def _menu_command_line(cmd: str) -> str:
                 if vertical in ("y", "yes"):
                     line += " --vertical"
         return line
-    if cmd == "best":
-        limit = input("limit VOD count [Enter for all]: ").strip()
-        return f"best {limit}" if limit else "best"
+    if cmd == "score":
+        mode = input("mode: vod, best, avg [vod]: ").strip().lower()
+        if mode in ("best", "avg", "average"):
+            limit = input("limit VOD count [Enter for all]: ").strip()
+            return f"score {mode}" + (f" {limit}" if limit else "")
+        vod = _pick_vod()
+        if not vod:
+            return ""
+        top = input("top [Enter for default]: ").strip()
+        return f"score {vod}" + (f" {top}" if top else "")
     if cmd == "window":
         vod = _pick_vod()
         if not vod:
@@ -1865,7 +1961,8 @@ def manual_repl(args=None) -> None:
             print(_vamp_cmd("list", "show archived VODs"))
             print(_vamp_cmd("peaks <id> [top=15]", "raw peak density"))
             print(_vamp_cmd("score <id> [top=15]", "Siphon virality scoring"))
-            print(_vamp_cmd("best [limit]", "highest score in each VOD"))
+            print(_vamp_cmd("score best [limit]", "highest score in each VOD"))
+            print(_vamp_cmd("score avg [limit]", "Avg. Score per VOD"))
             print(_vamp_cmd("export <id> [top=5]", "cut top clips"))
             print(f"  {_DIM}  flags: --subtitles --subtitle-model tiny --subtitle-font-size 28{_RST}")
             print(_vamp_cmd("codex <id> [top=5] [--raw]", "Codex clips (zoom + crawl)"))
@@ -1904,7 +2001,19 @@ def manual_repl(args=None) -> None:
         elif cmd in ("score", "virality"):
             argv = rest.split()
             if not argv:
-                print("  usage: score <vod_id> [top]")
+                print("  usage: score <vod_id> [top] | score best [limit] | score avg [limit]")
+                continue
+            if argv[0].lower() in ("best", "bestscores", "topvods"):
+                kwargs = {}
+                if len(argv) > 1 and argv[1].isdigit():
+                    kwargs["limit"] = int(argv[1])
+                _run_tool_with_spinner("best_scores", kwargs)
+                continue
+            if argv[0].lower() in ("avg", "average", "averages"):
+                kwargs = {}
+                if len(argv) > 1 and argv[1].isdigit():
+                    kwargs["limit"] = int(argv[1])
+                _run_tool_with_spinner("average_scores", kwargs)
                 continue
             kwargs = {"vod_id": argv[0]}
             if len(argv) > 1 and argv[1].isdigit():
