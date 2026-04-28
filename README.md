@@ -99,7 +99,7 @@ The agent's tools are the same code paths as these standalone scripts:
 python fetch_chat.py https://www.twitch.tv/videos/<id> --max-seconds <duration>
 
 # 2. heatmap + top-N peaks
-python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 15
+python heatmap.py chat_<id>.json --info vod_<id>.info.json --top 20
 
 # 3. per-peak chat detail for clip planning
 python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
@@ -108,7 +108,7 @@ python peaks_detail.py chat_<id>.json --peaks peaks.csv --out peaks_detail.md
 python export_top_clips.py archive/<dir>/viral_score.csv \
   --chat archive/<dir>/chat.json \
   --video ~/Desktop/VODs/<vod>.mp4 \
-  --top 5 --from-top 15 --pad 10
+  --top 5 --from-top 20 --pad 10
 
 # polished exports: fade-out, optional intro zoom, SHOCK punch-in
 python export_top_clips.py archive/<dir>/viral_score.csv \

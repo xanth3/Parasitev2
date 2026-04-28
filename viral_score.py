@@ -1,12 +1,13 @@
-"""Siphon virality engine — scores Twitch VOD peaks on a 0–100 Virality Index.
+"""Siphon virality engine - scores Twitch VOD peaks on a 0-100 Virality Index.
 
 Four-pillar algorithm:
   Velocity (37.5%): log2-scaled message-rate spike vs rolling 5-min baseline
-  Mood     (37.5%): dominant emote category (HYPE/FUNNY/SHOCK/DRAMA) weighted by confidence
-  Echo     (25%):   2-minute post-peak retention → Story / Lingering / Jump Scare
-  Magnitude (×):    peak volume vs VOD p99 as a 0.5–1.0 multiplicative scaler
+  Mood     (37.5%): dominant emote category weighted by confidence
+  Echo     (25%):   2-minute post-peak retention -> Story / Lingering / Jump Scare
+  Magnitude (x):    peak volume vs VOD p99 as a 0.5-1.0 multiplicative scaler
+  Heatmap: diagnostic only; not part of the virality formula
 
-Smart Padding: each peak gets a dynamic cut window at 1-second resolution —
+Smart Padding: each peak gets a dynamic cut window at 1-second resolution -
 starts 5s before the velocity ramp, ends when the echo tail falls silent for 10s.
 Adjacent windows within 15s are merged into a single clip (max 300s).
 
@@ -20,13 +21,14 @@ Usage:
 
 import argparse
 import csv
+import json
 import math
 import sys
 from collections import Counter
 from pathlib import Path
 from statistics import mean, median
 
-# Windows cp1252 safety — must come before any Unicode output
+# Windows cp1252 safety - must come before any Unicode output
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
         try:
@@ -46,15 +48,15 @@ from peaks_detail import load_peaks
 
 
 # ---------------------------------------------------------------------------
-# Mood lexicon — whitespace-split matching so short tokens (W, L, +2) survive
+# Mood lexicon - whitespace-split matching so short tokens (W, L, +2) survive
 # ---------------------------------------------------------------------------
 
-MOOD_LEXICON = {
+BASE_MOOD_LEXICON = {
     "HYPE":  {"POG", "POGGERS", "POGCHAMP", "HYPE", "LETSGO", "LETSGOO", "GIGACHAD",
               "CLEAN", "INSANE", "W", "WW", "+2", "GG", "GOAT", "MENACE",
-              "BASED", "ACTUAL", "CINEMA", "PAGMAN", "AURA", "BIG"},
+              "BASED", "ACTUAL", "PAGMAN", "BIG"},
     "FUNNY": {"LUL", "LULW", "OMEGALUL", "KEKW", "LMAO", "ICANT", "XD", "DEAD",
-               "CLUELESS", "OMEGADANCE", "HAHA", "LMFAO", "BALD", "SAMESHIRT",
+               "CLUELESS", "OMEGADANCE", "HAHA", "LMFAO",
               "4HEAD", "JEBAITED"},
     "SHOCK": {"WTF", "OMG", "HUH", "BRUH", "WIDEPEEPO", "NOWAY", "???", "WHAT",
               "HOLY", "NOSHOT", "NAHHH", "NAH", "BRO", "WAIT", "MONKAW",
@@ -63,12 +65,44 @@ MOOD_LEXICON = {
               "MALD", "TOUCH", "GRASS", "BOZO", "COOKED", "COPIUM", "REAL"},
 }
 
-# Reverse lookup: uppercase token → bucket name
-_TOKEN_TO_BUCKET: dict[str, str] = {
-    tok: bucket
-    for bucket, tokens in MOOD_LEXICON.items()
-    for tok in tokens
+STREAMER_MOOD_LEXICONS = {
+    "zackrawrr": {
+        "HYPE": {"CINEMA", "AURA", "COOKING"},
+        "FUNNY": {"BALD", "BALDY", "BALDIMORT", "SAMESHIRT", "SAME", "SHIRT"},
+        "DRAMA": {"FARMING", "LOOKING"},
+    },
+    "asmongold": {
+        "HYPE": {"CINEMA", "AURA", "COOKING"},
+        "FUNNY": {"BALD", "BALDY", "BALDIMORT", "SAMESHIRT", "SAME", "SHIRT"},
+        "DRAMA": {"FARMING", "LOOKING"},
+    },
+    "caseoh": {
+        "HYPE": {
+            "CASEOHLIFE", "CASEOHSPOOKYDAILYDOODLES", "CASEOHDAILYDOODLESTWERK",
+            "CASEOHDAILYDOODLEDANCE", "CASEOHKITTYYY", "CASEOHGOOBLIFE",
+            "CASEOHLOCKINCASEOH", "CASEOHWIIJAMS", "CASEOHPINK", "CASEOHTHUMBSUP",
+            "TWITCHCONHYPE", "DINODANCE", "XWIIZEPRAY", "GOTY", "GG", "WWW",
+            "WWWW", "WWWWW", "YOOOO", "YOOOOO", "GOATEMOTEY", "CASEOHALPHA",
+        },
+        "FUNNY": {
+            "CASEOHBBL", "BBL", "CASEOHNOODLES", "CASEOHDOOKIESTAIN",
+            "CASEOHCOMEONCUH", "CASEOHBTVKITTY", "CASEOHBYRANGEEDESIGNS",
+            "JINXLUL", "ARCHIT3LUL", "LMAOO", "LMAOOO", "LMAOOOO", "LOLLL",
+            "BABYRAGE", "STINKYCHEESE", "BULLY", "FEET", "TOES", "KITTY",
+            "CASEOHPETKITTY", "CASEOHKITTYYY",
+        },
+        "SHOCK": {
+            "NOTLIKETHIS", "OMG", "NO", "NAH", "BRUH", "BACKROOMS", "DOOR",
+            "RAVEN", "RED", "EYE", "LOST", "SPOOKY", "CASEOHBANNED",
+        },
+        "DRAMA": {
+            "PURGE", "MODS", "CAP", "REAL", "STOP", "LOCK", "LBRE", "DAD",
+            "KID", "KIDS", "ARKANSAS",
+        },
+    },
 }
+
+MOOD_LEXICON = BASE_MOOD_LEXICON
 
 BREAK_MARKERS = {"ASSEMBLE", "SCATTER"}
 
@@ -135,21 +169,93 @@ def compute_baseline(minute_counts: list[int], m: int, global_floor: float) -> f
     return max(raw, global_floor)
 
 
+def percentile_rank(values: list[int], value: int) -> float:
+    """Return the percentile rank of value among non-zero heatmap buckets."""
+    nz = _nonzero(values)
+    if not nz:
+        return 0.0
+    below_or_equal = sum(1 for v in nz if v <= value)
+    return 100.0 * below_or_equal / len(nz)
+
+
+def local_prominence(minute_counts: list[int], m: int) -> float:
+    """How strongly this heatmap bucket stands above its nearby context."""
+    context = (
+        minute_counts[max(0, m - 5):m]
+        + minute_counts[m + 1:min(len(minute_counts), m + 6)]
+    )
+    nz = _nonzero(context)
+    local_floor = mean(nz) if nz else 1.0
+    return minute_counts[m] / max(1.0, local_floor)
+
+
+def _merge_lexicons(*lexicons: dict[str, set[str]]) -> dict[str, set[str]]:
+    merged: dict[str, set[str]] = {k: set(v) for k, v in BASE_MOOD_LEXICON.items()}
+    for lexicon in lexicons:
+        for bucket, tokens in lexicon.items():
+            merged.setdefault(bucket, set()).update(t.upper() for t in tokens)
+    return merged
+
+
+def _token_to_bucket(lexicon: dict[str, set[str]]) -> dict[str, str]:
+    return {
+        tok: bucket
+        for bucket, tokens in lexicon.items()
+        for tok in tokens
+    }
+
+
+def normalize_streamer_key(name: str | None) -> str:
+    key = (name or "").lower().strip()
+    key = key.replace("-", "_")
+    key = key.rstrip("_")
+    if key in {"caseoh_", "caseoh"}:
+        return "caseoh"
+    if key in {"zackrawrr", "zack_rawrr", "asmongold"}:
+        return key
+    return key
+
+
+def streamer_from_info(info_path: str | Path | None) -> str | None:
+    if not info_path:
+        return None
+    try:
+        data = json.loads(Path(info_path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return (
+        data.get("uploader_id")
+        or data.get("uploader")
+        or data.get("channel")
+        or data.get("creator")
+    )
+
+
+def lexicon_for_streamer(streamer: str | None) -> tuple[dict[str, set[str]], str]:
+    key = normalize_streamer_key(streamer)
+    return _merge_lexicons(STREAMER_MOOD_LEXICONS.get(key, {})), key or "base"
+
+
 # ---------------------------------------------------------------------------
-# Mood scoring — dedicated whitespace-split tokenizer (not tokens_in)
+# Mood scoring - dedicated whitespace-split tokenizer (not tokens_in)
 # ---------------------------------------------------------------------------
 
-def classify_mood(window_bodies: list[str]) -> tuple[str, float, int, float]:
+def classify_mood(
+    window_bodies: list[str],
+    mood_lexicon: dict[str, set[str]] | None = None,
+) -> tuple[str, float, int, float]:
     """
     Returns (dominant_mood, concentration, total_mood_tokens, mood_score).
     Applies confidence shrinkage so sparse windows can't score 100.
     """
-    bucket_counts: dict[str, int] = {k: 0 for k in MOOD_LEXICON}
+    lexicon = mood_lexicon or BASE_MOOD_LEXICON
+    token_to_bucket = _token_to_bucket(lexicon)
+    bucket_counts: dict[str, int] = {k: 0 for k in lexicon}
     total = 0
     for body in window_bodies:
         for raw in body.split():
             tok = raw.upper().rstrip("!?,.")
-            bucket = _TOKEN_TO_BUCKET.get(tok)
+            bucket = token_to_bucket.get(tok)
             if bucket:
                 bucket_counts[bucket] += 1
                 total += 1
@@ -185,8 +291,8 @@ def smart_padding(
 ) -> tuple[int, int]:
     """
     Walk at 1-second resolution around peak_seconds.
-    Start: 5 quiet seconds found going backwards → use that position as lead-in.
-    End  : 10 consecutive quiet seconds going forward → cut there.
+    Start: 5 quiet seconds found going backwards -> use that position as lead-in.
+    End  : 10 consecutive quiet seconds going forward -> cut there.
     Duration clamped [30, 180]s.
     """
     look_back = 120
@@ -209,7 +315,7 @@ def smart_padding(
         if sec_counts[i] <= threshold:
             consec += 1
             if consec >= 5:
-                # i is the leftmost of the 5 quiet seconds — use it as natural start
+                # i is the leftmost of the 5 quiet seconds - use it as natural start
                 clip_start_idx = i
                 break
         else:
@@ -245,7 +351,7 @@ def smart_padding(
 
 def merge_overlapping_windows(scored_peaks: list[dict]) -> list[dict]:
     """
-    Fuse windows that are ≤15s apart (max merged duration 300s).
+    Fuse windows that are <=15s apart (max merged duration 300s).
     The higher-virality peak's metadata wins for merged entries.
     """
     if not scored_peaks:
@@ -261,11 +367,12 @@ def merge_overlapping_windows(scored_peaks: list[dict]) -> list[dict]:
         span = nxt["cut_end"] - cur["cut_start"]
         if gap <= 15 and span <= 300:
             cur["cut_end"] = max(cur["cut_end"], nxt["cut_end"])
-            cur["cut_window"] = f"{hms(cur['cut_start'])} → {hms(cur['cut_end'])}"
+            cur["cut_window"] = f"{hms(cur['cut_start'])} -> {hms(cur['cut_end'])}"
             cur["merged_peaks"] = cur["merged_peaks"] + nxt["merged_peaks"]
             if nxt["virality"] > cur["virality"]:
                 for k in ("virality", "mood", "mood_concentration", "velocity_multiplier",
-                          "echo_ratio", "echo_label", "magnitude_factor", "reasoning",
+                          "echo_ratio", "echo_label", "magnitude_factor", "heatmap_count",
+                          "heatmap_percentile", "heatmap_prominence", "heatmap_score", "reasoning",
                           "pillars", "segment", "timestamp", "seconds", "count"):
                     cur[k] = nxt[k]
         else:
@@ -290,8 +397,12 @@ def _reasoning(
     concentration: float,
     echo_ratio: float,
     magnitude_factor: float,
+    heatmap_percentile: float,
+    heatmap_prominence: float,
 ) -> str:
-    parts = [f"{multiplier:.1f}× velocity"]
+    parts = [f"{multiplier:.1f}x velocity"]
+    parts.append(f"p{int(round(heatmap_percentile))} heatmap")
+    parts.append(f"{heatmap_prominence:.1f}x local heat")
     if mood != "mixed":
         parts.append(f"{mood} ({concentration:.2f})")
     else:
@@ -303,7 +414,7 @@ def _reasoning(
     else:
         parts.append(f"Jump Scare echo {echo_ratio:.2f}")
     parts.append(f"p{int(magnitude_factor * 100)} volume")
-    return " · ".join(parts)
+    return " - ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +432,8 @@ def score_peak(
     global_median: float,
     p99: float,
     chapters: list[dict],
+    mood_lexicon: dict[str, set[str]] | None = None,
+    lexicon_name: str = "base",
 ) -> dict:
     m = peak["seconds"] // 60
     c_m = minute_counts[m] if m < len(minute_counts) else 0
@@ -328,13 +441,13 @@ def score_peak(
     global_floor = max(1.0, 0.3 * global_median)
     baseline = compute_baseline(minute_counts, m, global_floor)
 
-    # Velocity — log2 scale: 2× → 23, 10× → 77, 20× → 100
+    # Velocity - log2 scale: 2x -> 23, 10x -> 77, 20x -> 100
     multiplier = c_m / baseline
     velocity_score = min(100.0, max(0.0,
         100 * math.log2(max(1.0, multiplier)) / math.log2(20)
     ))
 
-    # Mood — whitespace tokenizer on 60s window
+    # Mood - whitespace tokenizer on 60s window
     ws, we = peak["seconds"], peak["seconds"] + 60
     win_bodies = [
         extract_body(c)
@@ -343,9 +456,9 @@ def score_peak(
     ]
     if has_break_marker(win_bodies):
         return {}
-    mood, concentration, mood_tok_total, mood_score = classify_mood(win_bodies)
+    mood, concentration, mood_tok_total, mood_score = classify_mood(win_bodies, mood_lexicon)
 
-    # Echo — 2-minute retention after peak
+    # Echo - 2-minute retention after peak
     m1 = minute_counts[m + 1] if m + 1 < len(minute_counts) else 0
     m2 = minute_counts[m + 2] if m + 2 < len(minute_counts) else 0
     n_echo = (1 if m + 1 < len(minute_counts) else 0) + (1 if m + 2 < len(minute_counts) else 0)
@@ -358,8 +471,19 @@ def score_peak(
         else "Jump Scare"
     )
 
-    # Magnitude — absolute reach scaler (0.5..1.0)
+    # Magnitude - absolute reach scaler (0.5..1.0)
     magnitude_factor = min(1.0, c_m / max(1.0, p99))
+    heatmap_percentile = percentile_rank(minute_counts, c_m)
+    heatmap_prominence = local_prominence(minute_counts, m)
+    heatmap_power = min(1.0, c_m / max(1.0, p99))
+    prominence_score = min(100.0, max(0.0,
+        100 * math.log2(max(1.0, heatmap_prominence)) / math.log2(10)
+    ))
+    heatmap_score = (
+        0.55 * heatmap_percentile
+        + 0.30 * (heatmap_power * 100)
+        + 0.15 * prominence_score
+    )
 
     # Final virality
     raw = (PILLAR_WEIGHTS["velocity"] * velocity_score
@@ -381,19 +505,33 @@ def score_peak(
         "segment":            segment,
         "virality":           virality,
         "mood":               mood,
+        "mood_lexicon":       lexicon_name,
         "mood_concentration": round(concentration, 3),
         "velocity_multiplier": round(multiplier, 2),
+        "heatmap_count":      c_m,
+        "heatmap_percentile": round(heatmap_percentile, 1),
+        "heatmap_prominence": round(heatmap_prominence, 2),
+        "heatmap_score":      int(round(heatmap_score)),
         "echo_ratio":         round(echo_ratio, 3),
         "echo_label":         echo_label,
         "magnitude_factor":   round(magnitude_factor, 3),
         "cut_start":          cut_start,
         "cut_end":            cut_end,
-        "cut_window":         f"{hms(cut_start)} → {hms(cut_end)}",
-        "reasoning":          _reasoning(multiplier, mood, concentration, echo_ratio, magnitude_factor),
+        "cut_window":         f"{hms(cut_start)} -> {hms(cut_end)}",
+        "reasoning":          _reasoning(
+            multiplier,
+            mood,
+            concentration,
+            echo_ratio,
+            magnitude_factor,
+            heatmap_percentile,
+            heatmap_prominence,
+        ),
         "pillars":            {
             "velocity": int(round(velocity_score)),
             "mood":     int(round(mood_score)),
             "echo":     int(round(echo_score)),
+            "heatmap":  int(round(heatmap_score)),
         },
         "merged_peaks":       [peak["rank"]],
     }
@@ -407,11 +545,13 @@ def score_peaks(
     comments: list[dict],
     peaks: list[dict],
     chapters: list[dict] | None = None,
+    streamer: str | None = None,
 ) -> list[dict]:
     """Score peaks and return list sorted by virality desc, windows merged."""
     minute_counts = bin_by_minute(comments)
     if not minute_counts:
         return []
+    mood_lexicon, lexicon_name = lexicon_for_streamer(streamer)
 
     nz = _nonzero(minute_counts)
     global_median = median(nz) if nz else 1.0
@@ -423,7 +563,9 @@ def score_peaks(
         for pk in eligible
         if (scored := score_peak(pk, minute_counts, comments,
                                  global_median=global_median, p99=p99,
-                                 chapters=chapters or []))
+                                 chapters=chapters or [],
+                                 mood_lexicon=mood_lexicon,
+                                 lexicon_name=lexicon_name))
     ]
     return merge_overlapping_windows(scored)
 
@@ -437,7 +579,7 @@ def score_from_paths(
     comments = load_comments(str(chat_path))
     peaks = load_peaks(str(peaks_path))
     chapters = load_chapters(str(info_path)) if info_path else []
-    return score_peaks(comments, peaks, chapters)
+    return score_peaks(comments, peaks, chapters, streamer_from_info(info_path))
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +588,9 @@ def score_from_paths(
 
 def write_csv(scored: list[dict], out_path: str | Path) -> None:
     fields = ["rank", "virality", "timestamp", "seconds", "cut_start", "cut_end", "cut_window", "mood",
-              "echo_label", "velocity_x", "magnitude", "segment", "reasoning"]
+              "mood_lexicon",
+              "echo_label", "velocity_x", "heatmap_score", "heatmap_count", "heatmap_percentile",
+              "heatmap_prominence", "magnitude", "segment", "reasoning"]
     rows = [{
         "rank":       p["rank"],
         "virality":   p["virality"],
@@ -456,8 +600,13 @@ def write_csv(scored: list[dict], out_path: str | Path) -> None:
         "cut_end":    p["cut_end"],
         "cut_window": p["cut_window"],
         "mood":       p["mood"],
+        "mood_lexicon": p.get("mood_lexicon", "base"),
         "echo_label": p["echo_label"],
-        "velocity_x": f"{p['velocity_multiplier']:.1f}×",
+        "velocity_x": f"{p['velocity_multiplier']:.1f}x",
+        "heatmap_score": p["heatmap_score"],
+        "heatmap_count": p["heatmap_count"],
+        "heatmap_percentile": f"{p['heatmap_percentile']:.1f}",
+        "heatmap_prominence": f"{p['heatmap_prominence']:.2f}",
         "magnitude":  f"{p['magnitude_factor']:.2f}",
         "segment":    p["segment"],
         "reasoning":  p["reasoning"],
@@ -475,10 +624,10 @@ def write_md(
     chat_name: str = "",
 ) -> None:
     lines = [
-        f"# Siphon Report — {chat_name}",
+        f"# Siphon Report - {chat_name}",
         "",
         f"Scored **{len(scored)}** clip(s)  ",
-        "Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler",
+        "Algorithm: Velocity (30%) - Mood (30%) - Echo (20%) - Heatmap (20%)",
         "",
     ]
     for p in scored:
@@ -489,15 +638,17 @@ def write_md(
         lines += [
             "---",
             "",
-            f"## #{p['rank']} · {p['virality']}/100 · {p['timestamp']} · {p['mood']}{merged_note}",
+            f"## #{p['rank']} - {p['virality']}/100 - {p['timestamp']} - {p['mood']}{merged_note}",
             "",
             f"**Cut window:** `{p['cut_window']}`  ",
+            f"**Mood lexicon:** {p.get('mood_lexicon', 'base')}  ",
             f"**Reasoning:** {p['reasoning']}  ",
-            f"**Segment:** {p['segment'] or '—'}  ",
+            f"**Segment:** {p['segment'] or '-'}  ",
             "",
-            "| Pillar | Score |",
+            "| Metric | Score |",
             "|---|---|",
-            f"| Velocity {p['velocity_multiplier']:.1f}× | {p['pillars']['velocity']} |",
+            f"| Velocity {p['velocity_multiplier']:.1f}x | {p['pillars']['velocity']} |",
+            f"| Heatmap p{p['heatmap_percentile']:.0f} / {p['heatmap_prominence']:.1f}x local | {p['pillars']['heatmap']} |",
             f"| Mood ({p['mood']}) | {p['pillars']['mood']} |",
             f"| Echo ({p['echo_label']}) | {p['pillars']['echo']} |",
             f"| Magnitude factor | {p['magnitude_factor']:.2f} |",
@@ -509,15 +660,18 @@ def write_md(
                if (off := extract_offset(c)) is not None
                and p["cut_start"] <= off < p["cut_end"]]
         mood_hits: Counter[str] = Counter()
+        active_token_to_bucket = _token_to_bucket(
+            _merge_lexicons(STREAMER_MOOD_LEXICONS.get(p.get("mood_lexicon", ""), {}))
+        )
         for c in win:
             for raw in extract_body(c).split():
                 tok = raw.upper().rstrip("!?,.")
-                if _TOKEN_TO_BUCKET.get(tok) == p["mood"]:
+                if active_token_to_bucket.get(tok) == p["mood"]:
                     mood_hits[tok] += 1
         if mood_hits:
             lines += [
                 "**Top mood tokens**", "",
-                " · ".join(f"`{t}` ×{n}" for t, n in mood_hits.most_common(12)),
+                " - ".join(f"`{t}` x{n}" for t, n in mood_hits.most_common(12)),
                 "",
             ]
 
@@ -542,13 +696,13 @@ def write_md(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Siphon — Twitch VOD virality scorer")
+    ap = argparse.ArgumentParser(description="Siphon - Twitch VOD virality scorer")
     ap.add_argument("chat_json", help="Path to chat JSON (archive/chat.json or legacy)")
     ap.add_argument("--peaks",   required=True, help="peaks.csv from heatmap.py")
     ap.add_argument("--info",    default=None,  help="Optional yt-dlp info.json for chapters")
     ap.add_argument("--csv",     default=None,  help="Output viral_score.csv path")
     ap.add_argument("--md",      default=None,  help="Output siphon_report.md path")
-    ap.add_argument("--top",     type=int, default=15, help="Peaks to score (default 15)")
+    ap.add_argument("--top",     type=int, default=20, help="Peaks to score (default 20)")
     args = ap.parse_args()
 
     chat_p = Path(args.chat_json)
@@ -556,7 +710,7 @@ def main() -> None:
     csv_out = args.csv or str(out_dir / "viral_score.csv")
     md_out  = args.md  or str(out_dir / "siphon_report.md")
 
-    print(f"Loading {chat_p.name}…", flush=True)
+    print(f"Loading {chat_p.name}...", flush=True)
     comments = load_comments(str(chat_p))
     print(f"  {len(comments):,} messages")
 
@@ -568,20 +722,21 @@ def main() -> None:
         chapters = load_chapters(args.info)
         print(f"  {len(chapters)} chapter(s)")
 
-    print("Scoring…", flush=True)
-    scored = score_peaks(comments, peaks, chapters)
+    print("Scoring...", flush=True)
+    scored = score_peaks(comments, peaks, chapters, streamer_from_info(args.info))
 
     write_csv(scored, csv_out)
-    print(f"→ {csv_out}")
+    print(f"-> {csv_out}")
     write_md(scored, comments, md_out, chat_p.name)
-    print(f"→ {md_out}")
+    print(f"-> {md_out}")
 
-    print(f"\n{'#':<4} {'Score':<7} {'Timestamp':<11} {'Mood':<9} {'Echo':<13} {'Vel×':<7} Window")
-    print("─" * 78)
+    print(f"\n{'#':<4} {'Score':<7} {'Timestamp':<11} {'Mood':<9} {'Echo':<13} {'Velocity':<9} {'Heatmap':<8} Window")
+    print("-" * 96)
     for s in scored:
         tag = f" (+{len(s['merged_peaks'])-1})" if len(s["merged_peaks"]) > 1 else ""
         print(f"#{s['rank']:<3} {s['virality']:<7} {s['timestamp']:<11} "
-              f"{s['mood']:<9} {s['echo_label']:<13} {s['velocity_multiplier']:<7.1f}"
+              f"{s['mood']:<9} {s['echo_label']:<13} {s['velocity_multiplier']:<9.1f}"
+              f"{s['heatmap_score']:<8}"
               f"{s['cut_window']}{tag}")
 
 

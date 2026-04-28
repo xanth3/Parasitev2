@@ -1,0 +1,4 @@
+rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,echo_label,velocity_x,heatmap_score,heatmap_count,heatmap_percentile,heatmap_prominence,magnitude,segment,reasoning
+1,59,0:08:00,480,416,687,0:06:56 â†’ 0:11:27,FUNNY,Story,1.1Ã—,38,161,50.0,1.10,0.34,Just Chatting,1.1Ã— velocity Â· p50 heatmap Â· 1.1x local heat Â· FUNNY (0.53) Â· Story echo 1.21 Â· p34 volume
+2,47,0:05:00,300,296,326,0:04:56 â†’ 0:05:26,FUNNY,Story,0.6Ã—,33,159,41.7,0.72,0.34,Just Chatting,0.6Ã— velocity Â· p42 heatmap Â· 0.7x local heat Â· FUNNY (0.35) Â· Story echo 0.72 Â· p34 volume
+3,23,0:06:00,360,356,386,0:05:56 â†’ 0:06:26,mixed,Story,0.4Ã—,15,86,16.7,0.45,0.18,Just Chatting,0.4Ã— velocity Â· p17 heatmap Â· 0.4x local heat Â· mixed mood Â· Story echo 1.77 Â· p18 volume

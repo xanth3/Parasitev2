@@ -10,6 +10,7 @@ import argparse
 import csv
 import html
 import json
+import os
 import re
 import subprocess
 import sys
@@ -24,12 +25,12 @@ from heatmap import extract_body, extract_offset, hms, load_comments
 
 HYPE = {
     "W", "WW", "WWW", "POG", "POGU", "POGGERS", "LETSGO", "LETSGOO",
-    "INSANE", "CLEAN", "GOAT", "PEAK", "CINEMA", "AURA", "COOKING",
+    "INSANE", "CLEAN", "GOAT", "PEAK",
 }
 
 FUNNY = {
     "LUL", "LULW", "OMEGALUL", "KEKW", "KEK", "LOL", "LMAO", "LMFAO",
-    "XD", "ICANT", "DEAD", "BALD", "BALDY", "BALDIMORT",
+    "XD", "ICANT", "DEAD",
 }
 
 SHOCK = {
@@ -43,8 +44,38 @@ CLIP_INTENT = {
 }
 
 COMMUNITY_MEMES = {
-    "BALD", "BALDY", "BALDIMORT", "CINEMA", "AURA", "COOKED",
-    "COOKING", "FARMING", "LOOKING", "DR PEPPER",
+    "COOKED",
+}
+
+STREAMER_SIGNAL_LEXICONS = {
+    "zackrawrr": {
+        "HYPE": {"CINEMA", "AURA", "COOKING"},
+        "FUNNY": {"BALD", "BALDY", "BALDIMORT", "SAMESHIRT", "SAME SHIRT"},
+        "COMMUNITY_MEMES": {"BALD", "BALDY", "BALDIMORT", "CINEMA", "AURA", "COOKING", "FARMING", "LOOKING", "DR PEPPER"},
+    },
+    "asmongold": {
+        "HYPE": {"CINEMA", "AURA", "COOKING"},
+        "FUNNY": {"BALD", "BALDY", "BALDIMORT", "SAMESHIRT", "SAME SHIRT"},
+        "COMMUNITY_MEMES": {"BALD", "BALDY", "BALDIMORT", "CINEMA", "AURA", "COOKING", "FARMING", "LOOKING", "DR PEPPER"},
+    },
+    "caseoh": {
+        "HYPE": {
+            "CASEOHLIFE", "CASEOHSPOOKYDAILYDOODLES", "CASEOHDAILYDOODLESTWERK",
+            "CASEOHDAILYDOODLEDANCE", "CASEOHKITTYYY", "CASEOHGOOBLIFE",
+            "CASEOHLOCKINCASEOH", "CASEOHWIIJAMS", "CASEOHPINK", "CASEOHTHUMBSUP",
+            "TWITCHCONHYPE", "DINODANCE", "XWIIZEPRAY", "GOTY", "GG", "WWW",
+            "WWWW", "WWWWW", "YOOOO", "YOOOOO", "GOATEMOTEY", "CASEOHALPHA",
+        },
+        "FUNNY": {
+            "CASEOHBBL", "BBL", "CASEOHNOODLES", "CASEOHDOOKIESTAIN",
+            "CASEOHCOMEONCUH", "CASEOHBTVKITTY", "CASEOHBYRANGEEDESIGNS",
+            "JINXLUL", "ARCHIT3LUL", "LMAOO", "LMAOOO", "LMAOOOO", "LOLLL",
+            "BABYRAGE", "STINKYCHEESE", "BULLY", "FEET", "TOES", "KITTY",
+            "CASEOHPETKITTY", "CASEOHKITTYYY",
+        },
+        "SHOCK": {"NOTLIKETHIS", "OMG", "NO", "NAH", "BRUH", "BACKROOMS", "DOOR", "RAVEN", "RED", "EYE", "LOST", "SPOOKY", "CASEOHBANNED"},
+        "COMMUNITY_MEMES": {"CASEOHBBL", "BBL", "CASEOHNOODLES", "CASEOHDOOKIESTAIN", "BACKROOMS", "FEET", "TOES", "KITTY", "CASEOHKITTYYY"},
+    },
 }
 
 NOISE = {
@@ -62,6 +93,7 @@ BAD_TITLE_PHRASES = {
 }
 SAFE_TAGS = "shorts,twitch,streamer,funny,hype,viral"
 DEFAULT_OUT_DIR = Path.home() / "Desktop" / "VODClips"
+DEFAULT_VODS_DIR = Path.home() / "Desktop" / "VODs"
 MEDIA_EXTS = {".mp4", ".mkv", ".mov", ".webm", ".avi", ".flv", ".m4v"}
 MICRO_SCAN_SECONDS = 60
 MICRO_WINDOW_SECONDS = 5
@@ -207,7 +239,45 @@ def _contains_any(norm: str, lexicon: set[str]) -> int:
     return hits
 
 
-def analyze_window(comments: list[dict], start: int, end: int) -> dict:
+def normalize_streamer_key(name: str | None) -> str:
+    key = (name or "").lower().strip().replace("-", "_").rstrip("_")
+    if key in {"caseoh_", "caseoh"}:
+        return "caseoh"
+    return key
+
+
+def streamer_key_from_paths(scores_path: Path, chat_path: Path | None = None) -> str:
+    for p in [scores_path, chat_path]:
+        if not p:
+            continue
+        for parent in [p.parent, p.parent.parent]:
+            for filename in ("meta.json", "info.json"):
+                candidate = parent / filename
+                if not candidate.exists():
+                    continue
+                try:
+                    data = json.loads(candidate.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                for key in ("streamer", "uploader_id", "uploader", "channel", "creator"):
+                    if data.get(key):
+                        return normalize_streamer_key(str(data[key]))
+    m = re.search(r"\d{4}-\d{2}-\d{2}_([^_]+)_v\d+", str(scores_path.parent))
+    return normalize_streamer_key(m.group(1) if m else "")
+
+
+def signal_lexicons(streamer_key: str) -> dict[str, set[str]]:
+    extra = STREAMER_SIGNAL_LEXICONS.get(streamer_key, {})
+    return {
+        "HYPE": HYPE | set(extra.get("HYPE", set())),
+        "FUNNY": FUNNY | set(extra.get("FUNNY", set())),
+        "SHOCK": SHOCK | set(extra.get("SHOCK", set())),
+        "COMMUNITY_MEMES": COMMUNITY_MEMES | set(extra.get("COMMUNITY_MEMES", set())),
+    }
+
+
+def analyze_window(comments: list[dict], start: int, end: int, streamer_key: str = "") -> dict:
+    lexicons = signal_lexicons(streamer_key)
     phrase_users: dict[str, set[str]] = defaultdict(set)
     token_users: dict[str, set[str]] = defaultdict(set)
     mood_counts = Counter()
@@ -235,21 +305,21 @@ def analyze_window(comments: list[dict], start: int, end: int) -> dict:
             if not _phrase_noise(tok):
                 token_users[tok].add(user)
 
-        for name, lexicon in (("HYPE", HYPE), ("FUNNY", FUNNY), ("SHOCK", SHOCK)):
+        for name, lexicon in (("HYPE", lexicons["HYPE"]), ("FUNNY", lexicons["FUNNY"]), ("SHOCK", lexicons["SHOCK"])):
             mood_counts[name] += _contains_any(norm, lexicon)
         clip_intent_hits += _contains_any(norm, CLIP_INTENT)
         noise_hits += _contains_any(norm, NOISE)
         for marker in BREAK_MARKERS:
             if _contains_any(norm, {marker}):
                 break_marker = marker
-        for meme in COMMUNITY_MEMES:
+        for meme in lexicons["COMMUNITY_MEMES"]:
             if _contains_any(norm, {meme}):
                 community_counts[meme] += 1
 
     def phrase_score(item):
         phrase, users_for_phrase = item
         count = len(users_for_phrase)
-        lex_bonus = 3 if phrase in (SHOCK | FUNNY | HYPE | COMMUNITY_MEMES) else 0
+        lex_bonus = 3 if phrase in (lexicons["SHOCK"] | lexicons["FUNNY"] | lexicons["HYPE"] | lexicons["COMMUNITY_MEMES"]) else 0
         len_bonus = 2 if 1 < len(phrase.split()) <= 3 else 0
         return (count * 10 + lex_bonus + len_bonus, count, len(phrase.split()))
 
@@ -279,6 +349,7 @@ def analyze_window(comments: list[dict], start: int, end: int) -> dict:
         "unique_chatters": len(users),
         "sample_messages": sample_messages,
         "_mood_counts": dict(mood_counts),
+        "_streamer_lexicon": streamer_key or "base",
     }
 
 
@@ -315,7 +386,7 @@ def _strong_signal_score(signals: dict) -> float:
     return score
 
 
-def refine_peak_seconds(row: dict, comments: list[dict]) -> tuple[int, dict]:
+def refine_peak_seconds(row: dict, comments: list[dict], streamer_key: str = "") -> tuple[int, dict]:
     """
     Heatmap peaks are minute buckets. Scan inside the hot minute and center on
     the strongest short burst so exports start before the actual beat, not just
@@ -336,7 +407,7 @@ def refine_peak_seconds(row: dict, comments: list[dict]) -> tuple[int, dict]:
     for center in range(bucket_start, last_center + 1):
         start = max(0, center - MICRO_WINDOW_SECONDS // 2)
         end = start + MICRO_WINDOW_SECONDS
-        signals = analyze_window(comments, start, end)
+        signals = analyze_window(comments, start, end, streamer_key)
         if signals.get("break_marker"):
             continue
         density = _density_count(comments, start, end)
@@ -390,10 +461,15 @@ def _title_case(s: str) -> str:
     return " ".join(out)
 
 
-def _usable_copy_phrase(phrase: str, count: int) -> bool:
+def _signal_sets_for(signals: dict) -> dict[str, set[str]]:
+    return signal_lexicons(str(signals.get("_streamer_lexicon") or ""))
+
+
+def _usable_copy_phrase(phrase: str, count: int, signals: dict | None = None) -> bool:
     if not phrase or count < 4 or phrase in BAD_TITLE_PHRASES:
         return False
-    if phrase in (SHOCK | FUNNY | HYPE | COMMUNITY_MEMES):
+    lexicons = _signal_sets_for(signals or {})
+    if phrase in (lexicons["SHOCK"] | lexicons["FUNNY"] | lexicons["HYPE"] | lexicons["COMMUNITY_MEMES"]):
         return True
     toks = phrase.split()
     return 1 < len(toks) <= 3 and not all(tok in STOPWORDS for tok in toks)
@@ -413,13 +489,14 @@ def generate_title(signals: dict, row: dict, used_titles: set[str], forbidden_te
     phrase = signals.get("top_phrase") or ""
     count = int(signals.get("top_phrase_count") or 0)
     mood = signals.get("dominant_mood")
+    lexicons = _signal_sets_for(signals)
 
     if signals.get("clip_intent_hits", 0) >= 2:
         title = "This Had To Be Clipped"
-    elif _usable_copy_phrase(phrase, count):
-        if phrase in SHOCK:
+    elif _usable_copy_phrase(phrase, count, signals):
+        if phrase in lexicons["SHOCK"]:
             title = f'This Turns Into A "{phrase}" Moment'
-        elif phrase in COMMUNITY_MEMES:
+        elif phrase in lexicons["COMMUNITY_MEMES"]:
             title = f'This Somehow Becomes "{phrase}"'
         else:
             title = f'This Turns Into A "{phrase}" Moment'
@@ -451,7 +528,7 @@ def generate_description(signals: dict, forbidden_terms: set[str] | None = None)
     mood = signals.get("dominant_mood")
     if signals.get("clip_intent_hits", 0) >= 2:
         desc = "This was bound to happen."
-    elif _usable_copy_phrase(phrase, count):
+    elif _usable_copy_phrase(phrase, count, signals):
         desc = f'It immediately turns into a "{phrase}" moment.'
     elif meme:
         desc = f'This somehow becomes a "{meme}" situation.'
@@ -533,8 +610,46 @@ def infer_vod_id(*values) -> str:
     return ""
 
 
+def infer_vod_folder(scores_path) -> str:
+    """Derive a per-VOD subfolder name from the scores path's parent directory.
+
+    If the parent matches the archive pattern (YYYY-MM-DD_streamer_vID),
+    return it directly. Otherwise fall back to 'vID' from the path.
+    """
+    parent = Path(scores_path).resolve().parent.name
+    if re.match(r"\d{4}-\d{2}-\d{2}_.+_v\d+$", parent):
+        return parent
+    vod_id = infer_vod_id(str(scores_path))
+    if vod_id:
+        return f"v{vod_id}"
+    return ""
+
+
 def twitch_vod_url(vod_id: str) -> str:
     return f"https://www.twitch.tv/videos/{vod_id}"
+
+
+def vods_dir() -> Path:
+    return Path(os.environ.get("VODS_DIR", DEFAULT_VODS_DIR)).expanduser()
+
+
+def find_local_video(vod_id: str, search_dir: str | Path | None = None) -> Path | None:
+    """Find a raw local VOD file whose name contains the VOD ID."""
+    vod_id = str(vod_id or "").strip()
+    if not vod_id:
+        return None
+    root = Path(search_dir).expanduser() if search_dir else vods_dir()
+    if not root.exists():
+        return None
+    candidates = []
+    for p in root.iterdir():
+        if not p.is_file() or p.suffix.lower() not in MEDIA_EXTS:
+            continue
+        if vod_id in p.stem:
+            candidates.append(p)
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda p: (len(p.name), p.name.lower()))[0]
 
 
 def resolve_stream_url(url: str) -> str:
@@ -568,19 +683,33 @@ def resolve_stream_url(url: str) -> str:
     return lines[0]
 
 
-def resolve_video_source(video_arg: str | Path, scores_path: Path) -> tuple[str, bool]:
-    """Return (ffmpeg input, is_local_file). Falls back to Twitch VOD URL."""
+def resolve_video_source(
+    video_arg: str | Path,
+    scores_path: Path,
+    *,
+    require_local: bool = False,
+    allow_twitch_fallback: bool = True,
+    search_dir: str | Path | None = None,
+) -> tuple[str, bool, str]:
+    """Return (ffmpeg input, is_local_file, source_kind), preferring local raw VODs."""
     raw = str(video_arg or "").strip()
-    if raw and is_url(raw):
-        return raw, False
+    vod_id = infer_vod_id(raw, scores_path, scores_path.parent)
+    local = find_local_video(vod_id, search_dir)
+    if local:
+        return str(local), True, "local"
     if raw:
+        if is_url(raw):
+            if require_local or not allow_twitch_fallback:
+                raise FileNotFoundError(f"local raw VOD not found for {vod_id or raw} in {vods_dir()}")
+            return raw, False, "twitch"
         p = Path(raw).expanduser()
         if p.exists():
-            return str(p), True
-    vod_id = infer_vod_id(raw, scores_path, scores_path.parent)
+            return str(p), True, "local_explicit"
     if not vod_id:
         raise FileNotFoundError(f"video not found and could not infer VOD ID: {raw}")
-    return twitch_vod_url(vod_id), False
+    if require_local or not allow_twitch_fallback:
+        raise FileNotFoundError(f"local raw VOD not found for {vod_id} in {vods_dir()}")
+    return twitch_vod_url(vod_id), False, "twitch"
 
 
 def _forbidden_terms(scores_path: Path, chat_path: Path, video_path: str | Path) -> set[str]:
@@ -1381,17 +1510,18 @@ def select_clip_plans(
     pad: int,
     forbidden_terms: set[str],
     analysis_pad: int | None = None,
+    streamer_key: str = "",
 ) -> list[dict]:
     candidates = []
     deferred = []
     for row in rows:
-        peak, micro = refine_peak_seconds(row, comments)
+        peak, micro = refine_peak_seconds(row, comments, streamer_key)
         start = max(0, peak - pad)
         end = peak + pad
         signal_pad = pad if analysis_pad is None else analysis_pad
         analysis_start = max(0, peak - signal_pad)
         analysis_end = peak + signal_pad
-        signals = analyze_window(comments, analysis_start, analysis_end)
+        signals = analyze_window(comments, analysis_start, analysis_end, streamer_key)
         density = _density_count(comments, analysis_start, analysis_end)
         quality = editor_quality_score(row, signals, micro, density)
         non_noise = (
@@ -1410,7 +1540,10 @@ def select_clip_plans(
 
         plan = {
             "row": row,
-            "signals": {k: v for k, v in signals.items() if not k.startswith("_")},
+            "signals": {
+                k: v for k, v in signals.items()
+                if not k.startswith("_") or k == "_streamer_lexicon"
+            },
             "peak_seconds": peak,
             "source_peak_seconds": int(row["_peak_seconds"]),
             "start_seconds": start,
@@ -1579,6 +1712,7 @@ def write_manifest_files(clips: list[dict], args, layout: OutputLayout) -> None:
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source_video": str(args.video),
         "requested_video": str(getattr(args, "requested_video", args.video)),
+        "video_source_kind": str(getattr(args, "video_source_kind", "")),
         "source_chat": str(args.chat),
         "source_scores": str(args.scores),
         "clip_count": len(clips),
@@ -1614,10 +1748,19 @@ def write_manifest_files(clips: list[dict], args, layout: OutputLayout) -> None:
 def export_top_clips(args) -> dict:
     args.scores = Path(args.scores)
     args.chat = Path(args.chat)
-    args.video, args.video_is_local = resolve_video_source(args.video, args.scores)
+    requested_video = str(getattr(args, "video", "") or "")
+    args.video, args.video_is_local, args.video_source_kind = resolve_video_source(
+        requested_video,
+        args.scores,
+        require_local=bool(getattr(args, "require_local_video", False)),
+        allow_twitch_fallback=bool(getattr(args, "allow_twitch_fallback", True)),
+    )
     original_video_source = args.video
-    args.requested_video = original_video_source
+    args.requested_video = requested_video or original_video_source
     out_dir = Path(args.out).expanduser()
+    vod_folder = infer_vod_folder(args.scores)
+    if vod_folder:
+        out_dir = out_dir / vod_folder
     layout = build_output_layout(out_dir, flat=getattr(args, "flat_output", False))
     if args.top <= 0 or args.from_top <= 0 or args.pad < 0:
         raise ValueError("--top and --from-top must be positive; --pad must be >= 0")
@@ -1635,8 +1778,9 @@ def export_top_clips(args) -> dict:
     warnings.extend(row_warnings)
     comments = load_comments(args.chat)
     forbidden_terms = _forbidden_terms(args.scores, args.chat, args.video)
+    streamer_key = streamer_key_from_paths(args.scores, args.chat)
     analysis_pad = args.analysis_pad if args.analysis_pad is not None else None
-    plans = select_clip_plans(rows, comments, args.top, args.pad, forbidden_terms, analysis_pad)
+    plans = select_clip_plans(rows, comments, args.top, args.pad, forbidden_terms, analysis_pad, streamer_key)
 
     clips = write_outputs(plans, args, layout, forbidden_terms, comments)
     if not args.dry_run:
@@ -1653,7 +1797,8 @@ def export_top_clips(args) -> dict:
         },
         "dry_run": args.dry_run,
         "source_video": str(args.video),
-        "requested_video": str(original_video_source),
+        "requested_video": str(args.requested_video),
+        "video_source_kind": args.video_source_kind,
         "warnings": warnings,
         "clip_count": len(clips),
         "clips": clips,
@@ -1664,10 +1809,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Export top Siphon clips from viral_score.csv")
     p.add_argument("scores", help="Path to viral_score.csv")
     p.add_argument("--chat", required=True, help="Path to chat.json")
-    p.add_argument("--video", required=True,
-                   help="Path to source VOD video, or Twitch URL. Missing local paths fall back to https://www.twitch.tv/videos/<id> when the VOD ID can be inferred.")
+    p.add_argument("--video", default="",
+                   help="Path to source VOD video, Twitch URL, or empty to infer VOD ID from scores and search ~/Desktop/VODs first.")
+    p.add_argument("--require-local-video", action="store_true",
+                   help="Fail if the raw VOD is not found in ~/Desktop/VODs or VODS_DIR.")
+    p.add_argument("--allow-twitch-fallback", action=argparse.BooleanOptionalAction, default=True,
+                   help="Allow fallback to https://www.twitch.tv/videos/<id> when no local raw VOD is found.")
     p.add_argument("--top", type=int, default=5)
-    p.add_argument("--from-top", type=int, default=15)
+    p.add_argument("--from-top", type=int, default=20)
     p.add_argument("--pad", type=int, default=10)
     p.add_argument("--analysis-pad", type=int, default=None,
                    help="Use this pad for scoring/title signals while --pad controls exported clip length")
@@ -1754,6 +1903,11 @@ def main(argv: list[str] | None = None) -> int:
 
     label = "DRY RUN" if result["dry_run"] else "EXPORTED"
     print(f"{label}: {result['clip_count']} clip(s) -> {result['output_dir']}")
+    print(f"Video source: {result.get('video_source_kind') or 'unknown'}")
+    print(f"Video path: {result.get('source_video')}")
+    requested = result.get("requested_video")
+    if requested and requested != result.get("source_video"):
+        print(f"Requested video: {requested}")
     layout = result.get("layout") or {}
     if layout:
         print(

@@ -1,0 +1,15 @@
+rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,mood_lexicon,echo_label,velocity_x,heatmap_score,heatmap_count,heatmap_percentile,heatmap_prominence,magnitude,segment,reasoning
+1,71,2:54:00,10440,10383,10563,2:53:03 -> 2:56:03,HYPE,caseoh,Story,2.2x,84,644,95.7,1.42,0.97,Dreamcore: Rabbit Hole,2.2x velocity - p96 heatmap - 1.4x local heat - HYPE (0.91) - Story echo 0.91 - p96 volume
+2,70,0:35:00,2100,2082,2262,0:34:42 -> 0:37:42,HYPE,caseoh,Story,2.0x,84,640,94.6,1.67,0.96,Fall Guys,2.0x velocity - p95 heatmap - 1.7x local heat - HYPE (0.50) - Story echo 0.72 - p96 volume
+3,66,1:22:00,4920,4806,4986,1:20:06 -> 1:23:06,HYPE,caseoh,Story,1.4x,85,652,97.3,1.33,0.98,The World's Hardest Game,1.4x velocity - p97 heatmap - 1.3x local heat - HYPE (0.90) - Story echo 0.79 - p98 volume
+4,66,1:33:00,5580,5498,5700,1:31:38 -> 1:35:00,DRAMA,caseoh,Story,1.4x,83,646,96.1,1.24,0.97,Dreamcore: Rabbit Hole,1.4x velocity - p96 heatmap - 1.2x local heat - DRAMA (0.61) - Story echo 0.96 - p97 volume
+5,65,1:10:00,4200,4173,4313,1:09:33 -> 1:11:53,HYPE,caseoh,Story,1.6x,83,634,93.0,1.69,0.95,The World's Hardest Game,1.6x velocity - p93 heatmap - 1.7x local heat - HYPE (0.65) - Story echo 0.63 - p95 volume
+6,64,1:25:00,5100,5094,5179,1:24:54 -> 1:26:19,HYPE,caseoh,Story,1.1x,86,663,98.8,1.33,1.00,Dreamcore: Rabbit Hole,1.1x velocity - p99 heatmap - 1.3x local heat - HYPE (0.92) - Story echo 0.67 - p99 volume
+7,63,0:10:00,600,533,713,0:08:53 -> 0:11:53,FUNNY,caseoh,Story,1.1x,84,656,98.4,1.09,0.99,Just Chatting,1.1x velocity - p98 heatmap - 1.1x local heat - FUNNY (0.53) - Story echo 0.95 - p98 volume
+8,63,0:16:00,960,846,1026,0:14:06 -> 0:17:06,HYPE,caseoh,Story,1.1x,83,647,96.5,1.16,0.97,Just Chatting,1.1x velocity - p96 heatmap - 1.2x local heat - HYPE (0.58) - Story echo 0.86 - p97 volume
+9,63,1:42:00,6120,6085,6218,1:41:25 -> 1:43:38,HYPE,caseoh,Story,1.2x,82,639,94.2,1.28,0.96,Dreamcore: Rabbit Hole,1.2x velocity - p94 heatmap - 1.3x local heat - HYPE (0.97) - Story echo 0.77 - p96 volume
+10,61,1:37:00,5820,5801,5908,1:36:41 -> 1:38:28,HYPE,caseoh,Story,1.0x,83,649,96.9,1.12,0.98,Dreamcore: Rabbit Hole,1.0x velocity - p97 heatmap - 1.1x local heat - HYPE (0.77) - Story echo 0.65 - p97 volume
+11,60,2:00:00,7200,6989,7260,1:56:29 -> 2:01:00,HYPE,caseoh,Story,1.1x,84,655,98.1,1.09,0.98,Dreamcore: Rabbit Hole,1.1x velocity - p98 heatmap - 1.1x local heat - HYPE (0.46) - Story echo 0.91 - p98 volume
+12,60,2:28:00,8880,8761,8941,2:26:01 -> 2:29:01,HYPE,caseoh,Story,1.6x,83,636,93.8,1.56,0.96,Dreamcore: Rabbit Hole,1.6x velocity - p94 heatmap - 1.6x local heat - HYPE (0.40) - Story echo 0.77 - p95 volume
+13,57,2:59:00,10740,10620,10800,2:57:00 -> 3:00:00,HYPE,caseoh,Lingering,1.1x,85,654,97.7,1.29,0.98,Games + Demos,1.1x velocity - p98 heatmap - 1.3x local heat - HYPE (0.67) - Lingering echo 0.52 - p98 volume
+14,53,2:04:00,7440,7339,7519,2:02:19 -> 2:05:19,FUNNY,caseoh,Story,1.0x,82,641,94.9,1.16,0.96,Dreamcore: Rabbit Hole,1.0x velocity - p95 heatmap - 1.2x local heat - FUNNY (0.38) - Story echo 0.86 - p96 volume

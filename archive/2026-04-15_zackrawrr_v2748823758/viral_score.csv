@@ -1,0 +1,12 @@
+rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,echo_label,velocity_x,heatmap_score,heatmap_count,heatmap_percentile,heatmap_prominence,magnitude,segment,reasoning
+1,72,2:50:00,10200,10125,10305,2:48:45 â†’ 2:51:45,FUNNY,Story,1.7Ã—,86,611,98.0,1.55,0.99,Just Chatting,1.7Ã— velocity Â· p98 heatmap Â· 1.6x local heat Â· FUNNY (0.48) Â· Story echo 0.80 Â· p98 volume
+2,71,3:00:00,10800,10789,10969,2:59:49 â†’ 3:02:49,SHOCK,Story,2.0Ã—,86,594,96.5,1.90,0.96,Just Chatting,2.0Ã— velocity Â· p96 heatmap Â· 1.9x local heat Â· SHOCK (0.44) Â· Story echo 0.68 Â· p96 volume
+3,70,3:39:00,13140,13029,13209,3:37:09 â†’ 3:40:09,FUNNY,Story,1.4Ã—,86,609,97.7,1.42,0.98,Just Chatting,1.4Ã— velocity Â· p98 heatmap Â· 1.4x local heat Â· FUNNY (0.57) Â· Story echo 0.88 Â· p98 volume
+4,69,4:12:00,15120,15099,15279,4:11:39 â†’ 4:14:39,SHOCK,Story,1.7Ã—,86,616,98.7,1.30,1.00,Just Chatting,1.7Ã— velocity Â· p99 heatmap Â· 1.3x local heat Â· SHOCK (0.45) Â· Story echo 0.98 Â· p99 volume
+5,68,4:21:00,15660,15644,15722,4:20:44 â†’ 4:22:02,FUNNY,Story,1.1Ã—,86,626,99.7,1.13,1.00,Just Chatting,1.1Ã— velocity Â· p100 heatmap Â· 1.1x local heat Â· FUNNY (0.65) Â· Story echo 0.89 Â· p100 volume
+6,68,4:27:00,16020,15887,16167,4:24:47 â†’ 4:29:27,FUNNY,Story,1.2Ã—,85,618,99.0,1.11,1.00,Just Chatting,1.2Ã— velocity Â· p99 heatmap Â· 1.1x local heat Â· FUNNY (0.55) Â· Story echo 0.96 Â· p99 volume
+7,68,4:28:00,16080,16015,16195,4:26:55 â†’ 4:29:55,FUNNY,Story,1.1Ã—,84,613,98.2,1.08,0.99,Just Chatting,1.1Ã— velocity Â· p98 heatmap Â· 1.1x local heat Â· FUNNY (0.51) Â· Story echo 0.92 Â· p99 volume
+8,67,4:18:00,15480,15411,15591,4:16:51 â†’ 4:19:51,FUNNY,Story,1.0Ã—,83,604,97.2,1.04,0.98,Just Chatting,1.0Ã— velocity Â· p97 heatmap Â· 1.0x local heat Â· FUNNY (0.50) Â· Story echo 0.92 Â· p97 volume
+9,64,2:29:00,8940,8932,9076,2:28:52 â†’ 2:31:16,HYPE,Lingering,1.6Ã—,86,599,96.7,1.85,0.97,Just Chatting,1.7Ã— velocity Â· p97 heatmap Â· 1.8x local heat Â· HYPE (0.41) Â· Lingering echo 0.57 Â· p96 volume
+10,63,3:41:00,13260,13253,13371,3:40:53 â†’ 3:42:51,HYPE,Story,1.2Ã—,86,609,97.7,1.62,0.98,Just Chatting,1.2Ã— velocity Â· p98 heatmap Â· 1.6x local heat Â· HYPE (0.41) Â· Story echo 0.65 Â· p98 volume
+11,60,4:32:00,16320,16312,16408,4:31:52 â†’ 4:33:28,FUNNY,Story,1.1Ã—,87,625,99.5,1.32,1.00,Just Chatting,1.1Ã— velocity Â· p99 heatmap Â· 1.3x local heat Â· FUNNY (0.37) Â· Story echo 0.84 Â· p100 volume

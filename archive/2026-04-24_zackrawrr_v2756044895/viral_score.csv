@@ -1,8 +1,11 @@
-rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,echo_label,velocity_x,magnitude,segment,reasoning
-1,67,1:00:00,3600,3587,3834,0:59:47 → 1:03:54,HYPE,Story,1.9×,1.00,Just Chatting,1.9× velocity · HYPE (0.45) · Story echo 0.82 · p100 volume
-2,66,0:47:00,2820,2776,2965,0:46:16 → 0:49:25,FUNNY,Story,3.5×,0.68,Just Chatting,3.5× velocity · FUNNY (0.50) · Story echo 0.94 · p68 volume
-3,64,0:55:00,3300,3282,3437,0:54:42 → 0:57:17,FUNNY,Lingering,2.1×,0.99,Just Chatting,2.2× velocity · FUNNY (0.62) · Lingering echo 0.46 · p99 volume
-4,57,1:14:00,4440,4353,4522,1:12:33 → 1:15:22,FUNNY,Lingering,1.4×,0.82,Just Chatting,1.4× velocity · FUNNY (0.64) · Lingering echo 0.55 · p82 volume
-5,51,0:51:00,3060,3046,3226,0:50:46 → 0:53:46,FUNNY,Story,1.4×,0.68,Just Chatting,1.4× velocity · FUNNY (0.41) · Story echo 0.67 · p68 volume
-6,48,1:11:00,4260,4228,4336,1:10:28 → 1:12:16,SHOCK,Story,1.5×,0.71,Just Chatting,1.5× velocity · SHOCK (0.36) · Story echo 0.89 · p70 volume
-7,48,1:18:00,4680,4659,4808,1:17:39 → 1:20:08,HYPE,Story,1.1×,0.65,Just Chatting,1.1× velocity · HYPE (0.42) · Story echo 0.70 · p64 volume
+rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,mood_lexicon,echo_label,velocity_x,heatmap_score,heatmap_count,heatmap_percentile,heatmap_prominence,magnitude,segment,reasoning
+1,77,0:47:00,2820,2776,2965,0:46:16 â†’ 0:49:25,FUNNY,zackrawrr,Story,3.5Ã—,72,421,86.6,1.97,0.68,Just Chatting,3.5Ã— velocity Â· p87 heatmap Â· 2.0x local heat Â· FUNNY (0.51) Â· Story echo 0.94 Â· p68 volume
+2,70,1:02:00,3720,3587,3834,0:59:47 â†’ 1:03:54,FUNNY,zackrawrr,Story,1.5Ã—,82,545,95.1,1.58,0.88,Just Chatting,1.5Ã— velocity Â· p95 heatmap Â· 1.6x local heat Â· FUNNY (0.55) Â· Story echo 0.72 Â· p88 volume
+3,69,0:55:00,3300,3282,3437,0:54:42 â†’ 0:57:17,FUNNY,zackrawrr,Lingering,2.1Ã—,89,615,98.8,1.96,0.99,Just Chatting,2.2Ã— velocity Â· p99 heatmap Â· 2.0x local heat Â· FUNNY (0.61) Â· Lingering echo 0.46 Â· p99 volume
+4,66,0:29:00,1740,1689,1806,0:28:09 â†’ 0:30:06,FUNNY,zackrawrr,Lingering,1.8Ã—,67,379,80.5,1.90,0.61,Just Chatting,1.8Ã— velocity Â· p80 heatmap Â· 1.9x local heat Â· FUNNY (0.48) Â· Lingering echo 0.59 Â· p61 volume
+5,65,1:13:00,4380,4353,4522,1:12:33 â†’ 1:15:22,FUNNY,zackrawrr,Story,1.2Ã—,69,420,85.4,1.20,0.68,Just Chatting,1.2Ã— velocity Â· p85 heatmap Â· 1.2x local heat Â· FUNNY (0.60) Â· Story echo 0.84 Â· p67 volume
+6,63,0:51:00,3060,3046,3229,0:50:46 â†’ 0:53:49,FUNNY,zackrawrr,Story,1.4Ã—,70,422,87.8,1.26,0.68,Just Chatting,1.4Ã— velocity Â· p88 heatmap Â· 1.3x local heat Â· FUNNY (0.42) Â· Story echo 0.67 Â· p68 volume
+7,62,1:16:00,4560,4553,4618,1:15:53 â†’ 1:16:58,FUNNY,zackrawrr,Story,0.9Ã—,61,361,78.0,1.11,0.58,Just Chatting,0.9Ã— velocity Â· p78 heatmap Â· 1.1x local heat Â· FUNNY (0.49) Â· Story echo 0.92 Â· p58 volume
+8,60,1:18:00,4680,4659,4808,1:17:39 â†’ 1:20:08,HYPE,zackrawrr,Story,1.1Ã—,67,401,82.9,1.32,0.65,Just Chatting,1.1Ã— velocity Â· p83 heatmap Â· 1.3x local heat Â· HYPE (0.42) Â· Story echo 0.70 Â· p64 volume
+9,55,1:11:00,4260,4228,4336,1:10:28 â†’ 1:12:16,FUNNY,zackrawrr,Story,1.5Ã—,72,437,89.0,1.32,0.71,Just Chatting,1.5Ã— velocity Â· p89 heatmap Â· 1.3x local heat Â· FUNNY (0.28) Â· Story echo 0.89 Â· p70 volume
+10,52,1:07:00,4020,4016,4046,1:06:56 â†’ 1:07:26,SHOCK,zackrawrr,Story,1.0Ã—,60,360,76.8,1.01,0.58,Just Chatting,1.0Ã— velocity Â· p77 heatmap Â· 1.0x local heat Â· SHOCK (0.34) Â· Story echo 0.95 Â· p58 volume

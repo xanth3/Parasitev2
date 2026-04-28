@@ -1,60 +1,28 @@
-# Siphon Report — chat.json
+# Siphon Report â€” chat.json
 
-Scored **7** clip(s)  
-Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
-
----
-
-## #1 · 67/100 · 1:00:00 · HYPE *(merged #1, #7, #5, #9)*
-
-**Cut window:** `0:59:47 → 1:03:54`  
-**Reasoning:** 1.9× velocity · HYPE (0.45) · Story echo 0.82 · p100 volume  
-**Segment:** Just Chatting  
-
-| Pillar | Score |
-|---|---|
-| Velocity 1.9× | 21 |
-| Mood (HYPE) | 90 |
-| Echo (Story) | 100 |
-| Magnitude factor | 1.00 |
-
-**Top mood tokens**
-
-`CINEMA` ×50 · `BIG` ×24 · `W` ×7 · `BASED` ×5 · `GOAT` ×4 · `INSANE` ×3 · `LETSGO` ×2 · `AURA` ×2 · `POGCHAMP` ×1 · `GIGACHAD` ×1 · `ACTUAL` ×1
-
-**Sample messages**
-
-| +mm:ss | user | message |
-|---|---|---|
-| +00:00 | Cess_Wizard | Cess_Wizard watched 90 consecutive streams and sparked a watch streak! Were cooked |
-| +00:26 | kaineheresy | Biden and Obama |
-| +00:46 | Chwaee | You HAVE to have IRGC |
-| +01:07 | schluety | IRAN |
-| +01:25 | IanSharpComedy | Black Snape |
-| +01:58 | tehshoe | LO |
-| +02:21 | QuestText | LOL |
-| +02:48 | J0eyRavi0li | ... |
-| +03:09 | frostbite1090 | so funny |
-| +03:35 | levi007hecho | snake community |
+Scored **10** clip(s)  
+Algorithm: Velocity (30%) - Mood (30%) - Echo (20%) - Heatmap (20%)
 
 ---
 
-## #2 · 66/100 · 0:47:00 · FUNNY *(merged #12, #4)*
+## #1 Â· 77/100 Â· 0:47:00 Â· FUNNY *(merged #12, #4)*
 
-**Cut window:** `0:46:16 → 0:49:25`  
-**Reasoning:** 3.5× velocity · FUNNY (0.50) · Story echo 0.94 · p68 volume  
+**Cut window:** `0:46:16 â†’ 0:49:25`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 3.5Ã— velocity Â· p87 heatmap Â· 2.0x local heat Â· FUNNY (0.51) Â· Story echo 0.94 Â· p68 volume  
 **Segment:** Just Chatting  
 
-| Pillar | Score |
+| Metric | Score |
 |---|---|
-| Velocity 3.5× | 42 |
+| Velocity 3.5Ã— | 42 |
+| Heatmap p87 / 2.0x local | 72 |
 | Mood (FUNNY) | 100 |
 | Echo (Story) | 100 |
 | Magnitude factor | 0.68 |
 
 **Top mood tokens**
 
-`LUL` ×160 · `LMAO` ×29 · `KEKW` ×19 · `LMFAO` ×8 · `ICANT` ×2 · `LULW` ×2 · `DEAD` ×2 · `OMEGALUL` ×2 · `XD` ×2 · `4HEAD` ×1 · `HAHA` ×1
+`LUL` Ã—160 Â· `LMAO` Ã—29 Â· `KEKW` Ã—19 Â· `SHIRT` Ã—9 Â· `SAME` Ã—8 Â· `LMFAO` Ã—8 Â· `ICANT` Ã—2 Â· `LULW` Ã—2 Â· `DEAD` Ã—2 Â· `OMEGALUL` Ã—2 Â· `XD` Ã—2 Â· `4HEAD` Ã—1
 
 **Sample messages**
 
@@ -73,22 +41,60 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #3 · 64/100 · 0:55:00 · FUNNY
+## #2 Â· 70/100 Â· 1:02:00 Â· FUNNY *(merged #1, #7, #5, #9)*
 
-**Cut window:** `0:54:42 → 0:57:17`  
-**Reasoning:** 2.2× velocity · FUNNY (0.62) · Lingering echo 0.46 · p99 volume  
+**Cut window:** `0:59:47 â†’ 1:03:54`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 1.5Ã— velocity Â· p95 heatmap Â· 1.6x local heat Â· FUNNY (0.55) Â· Story echo 0.72 Â· p88 volume  
 **Segment:** Just Chatting  
 
-| Pillar | Score |
+| Metric | Score |
 |---|---|
-| Velocity 2.1× | 26 |
+| Velocity 1.5Ã— | 13 |
+| Heatmap p95 / 1.6x local | 82 |
+| Mood (FUNNY) | 100 |
+| Echo (Story) | 100 |
+| Magnitude factor | 0.88 |
+
+**Top mood tokens**
+
+`LUL` Ã—136 Â· `LMAO` Ã—36 Â· `KEKW` Ã—26 Â· `SAME` Ã—12 Â· `LMFAO` Ã—11 Â· `HAHA` Ã—8 Â· `ICANT` Ã—6 Â· `XD` Ã—3 Â· `OMEGALUL` Ã—3 Â· `BALDY` Ã—1 Â· `BALD` Ã—1 Â· `DEAD` Ã—1
+
+**Sample messages**
+
+| +mm:ss | user | message |
+|---|---|---|
+| +00:00 | Cess_Wizard | Cess_Wizard watched 90 consecutive streams and sparked a watch streak! Were cooked |
+| +00:26 | kaineheresy | Biden and Obama |
+| +00:46 | Chwaee | You HAVE to have IRGC |
+| +01:07 | schluety | IRAN |
+| +01:25 | IanSharpComedy | Black Snape |
+| +01:58 | tehshoe | LO |
+| +02:21 | QuestText | LOL |
+| +02:48 | J0eyRavi0li | ... |
+| +03:09 | frostbite1090 | so funny |
+| +03:35 | levi007hecho | snake community |
+
+---
+
+## #3 Â· 69/100 Â· 0:55:00 Â· FUNNY *(merged #2, #16)*
+
+**Cut window:** `0:54:42 â†’ 0:57:17`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 2.2Ã— velocity Â· p99 heatmap Â· 2.0x local heat Â· FUNNY (0.61) Â· Lingering echo 0.46 Â· p99 volume  
+**Segment:** Just Chatting  
+
+| Metric | Score |
+|---|---|
+| Velocity 2.1Ã— | 26 |
+| Heatmap p99 / 2.0x local | 89 |
 | Mood (FUNNY) | 100 |
 | Echo (Lingering) | 69 |
 | Magnitude factor | 0.99 |
 
 **Top mood tokens**
 
-`LUL` ×101 · `LMAO` ×27 · `KEKW` ×23 · `ICANT` ×8 · `OMEGALUL` ×6 · `XD` ×6 · `HAHA` ×4 · `LMFAO` ×3 · `BALD` ×2 · `CLUELESS` ×1
+`LUL` Ã—101 Â· `LMAO` Ã—27 Â· `KEKW` Ã—23 Â· `ICANT` Ã—8 Â· `OMEGALUL` Ã—6 Â· `XD` Ã—6 Â· `HAHA` Ã—4 Â· `LMFAO` Ã—3 Â· `BALD` Ã—2 Â· `CLUELESS` Ã—1
 
 **Sample messages**
 
@@ -107,22 +113,60 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #4 · 57/100 · 1:14:00 · FUNNY *(merged #13, #6)*
+## #4 Â· 66/100 Â· 0:29:00 Â· FUNNY
 
-**Cut window:** `1:12:33 → 1:15:22`  
-**Reasoning:** 1.4× velocity · FUNNY (0.64) · Lingering echo 0.55 · p82 volume  
+**Cut window:** `0:28:09 â†’ 0:30:06`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 1.8Ã— velocity Â· p80 heatmap Â· 1.9x local heat Â· FUNNY (0.48) Â· Lingering echo 0.59 Â· p61 volume  
 **Segment:** Just Chatting  
 
-| Pillar | Score |
+| Metric | Score |
 |---|---|
-| Velocity 1.4× | 11 |
-| Mood (FUNNY) | 100 |
-| Echo (Lingering) | 82 |
-| Magnitude factor | 0.82 |
+| Velocity 1.8Ã— | 20 |
+| Heatmap p80 / 1.9x local | 67 |
+| Mood (FUNNY) | 95 |
+| Echo (Lingering) | 89 |
+| Magnitude factor | 0.61 |
 
 **Top mood tokens**
 
-`LUL` ×90 · `LMAO` ×35 · `KEKW` ×33 · `HAHA` ×8 · `ICANT` ×5 · `XD` ×3 · `OMEGALUL` ×2 · `LULW` ×2 · `LMFAO` ×2 · `JEBAITED` ×1 · `CLUELESS` ×1 · `4HEAD` ×1
+`LUL` Ã—19 Â· `LMAO` Ã—8 Â· `KEKW` Ã—3 Â· `XD` Ã—2 Â· `BALDY` Ã—1 Â· `ICANT` Ã—1 Â· `4HEAD` Ã—1
+
+**Sample messages**
+
+| +mm:ss | user | message |
+|---|---|---|
+| +00:00 | Chrisgreen1997 | Rage L |
+| +00:15 | error404_la | XD |
+| +00:27 | vanhellsun | TEN TOES DOWN |
+| +00:41 | signals____ | I cared. never forget |
+| +00:56 | Metalpup_ | om |
+| +01:02 | d4rk_s74r | 4Head |
+| +01:07 | Lukekibbles | wtf |
+| +01:13 | mrchickenz555 | this was hasan givng relantionship advice with frogan |
+| +01:22 | gumbislice | She is Kya |
+| +01:38 | requiem569 | yes they are too uptight |
+
+---
+
+## #5 Â· 65/100 Â· 1:13:00 Â· FUNNY *(merged #13, #6)*
+
+**Cut window:** `1:12:33 â†’ 1:15:22`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 1.2Ã— velocity Â· p85 heatmap Â· 1.2x local heat Â· FUNNY (0.60) Â· Story echo 0.84 Â· p67 volume  
+**Segment:** Just Chatting  
+
+| Metric | Score |
+|---|---|
+| Velocity 1.2Ã— | 6 |
+| Heatmap p85 / 1.2x local | 69 |
+| Mood (FUNNY) | 100 |
+| Echo (Story) | 100 |
+| Magnitude factor | 0.68 |
+
+**Top mood tokens**
+
+`LUL` Ã—90 Â· `LMAO` Ã—35 Â· `KEKW` Ã—33 Â· `HAHA` Ã—8 Â· `ICANT` Ã—5 Â· `SAME` Ã—3 Â· `XD` Ã—3 Â· `OMEGALUL` Ã—2 Â· `LULW` Ã—2 Â· `LMFAO` Ã—2 Â· `JEBAITED` Ã—1 Â· `CLUELESS` Ã—1
 
 **Sample messages**
 
@@ -141,56 +185,132 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #5 · 51/100 · 0:51:00 · FUNNY
+## #6 Â· 63/100 Â· 0:51:00 Â· FUNNY *(merged #11, #18)*
 
-**Cut window:** `0:50:46 → 0:53:46`  
-**Reasoning:** 1.4× velocity · FUNNY (0.41) · Story echo 0.67 · p68 volume  
+**Cut window:** `0:50:46 â†’ 0:53:49`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 1.4Ã— velocity Â· p88 heatmap Â· 1.3x local heat Â· FUNNY (0.42) Â· Story echo 0.67 Â· p68 volume  
 **Segment:** Just Chatting  
 
-| Pillar | Score |
+| Metric | Score |
 |---|---|
-| Velocity 1.4× | 12 |
-| Mood (FUNNY) | 82 |
+| Velocity 1.4Ã— | 12 |
+| Heatmap p88 / 1.3x local | 70 |
+| Mood (FUNNY) | 83 |
 | Echo (Story) | 100 |
 | Magnitude factor | 0.68 |
 
 **Top mood tokens**
 
-`LUL` ×58 · `KEKW` ×12 · `LMAO` ×11 · `XD` ×4 · `OMEGALUL` ×2 · `DEAD` ×2 · `ICANT` ×1 · `HAHA` ×1 · `LMFAO` ×1
+`LUL` Ã—58 Â· `KEKW` Ã—14 Â· `LMAO` Ã—12 Â· `XD` Ã—4 Â· `SAME` Ã—4 Â· `OMEGALUL` Ã—2 Â· `DEAD` Ã—2 Â· `ICANT` Ã—1 Â· `HAHA` Ã—1 Â· `LMFAO` Ã—1
 
 **Sample messages**
 
 | +mm:ss | user | message |
 |---|---|---|
 | +00:00 | mattmans420 | Did you see Guga Sitting on Totinos Frozen Pizza? |
-| +00:17 | tau_enjoyer | COOKED |
-| +00:30 | TooTified | Please stop and get help..No more OF 4 U |
-| +00:41 | commmss | @zackrawrr dont they know porn is free? Sadge |
-| +00:57 | waffables | Hell Yeah |
-| +01:14 | TheJadedGamer | no way if he doing 12 an hour that is less than 2k a month so in 6 months he makes like 12k tops |
-| +01:52 | DiarrheaGary | It's like that Nuke guy giving away national secrets |
-| +02:14 | IGDemo | sounds more fun tbh |
-| +02:31 | Janxxxu | Yea thats enough :D |
-| +02:43 | Sippity | o7 my gosh |
+| +00:17 | TymesRhymes | What a retard |
+| +00:30 | Lethiian | fucking retard |
+| +00:42 | its__lamashtu | he's paying the stupid tax big time LUL |
+| +00:57 | cropod | LUL |
+| +01:17 | sm0keburp | pussy undefeated |
+| +01:53 | CrashTestDummy | double flayed |
+| +02:20 | cropod | CAUGHT |
+| +02:34 | ghost_rainfall | that many waifus... dang |
+| +02:45 | Dreif | that's for sure a desktop browser KEKW |
 
 ---
 
-## #6 · 48/100 · 1:11:00 · SHOCK
+## #7 Â· 62/100 Â· 1:16:00 Â· FUNNY
 
-**Cut window:** `1:10:28 → 1:12:16`  
-**Reasoning:** 1.5× velocity · SHOCK (0.36) · Story echo 0.89 · p70 volume  
+**Cut window:** `1:15:53 â†’ 1:16:58`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 0.9Ã— velocity Â· p78 heatmap Â· 1.1x local heat Â· FUNNY (0.49) Â· Story echo 0.92 Â· p58 volume  
 **Segment:** Just Chatting  
 
-| Pillar | Score |
+| Metric | Score |
 |---|---|
-| Velocity 1.5× | 13 |
-| Mood (SHOCK) | 71 |
+| Velocity 0.9Ã— | 0 |
+| Heatmap p78 / 1.1x local | 61 |
+| Mood (FUNNY) | 98 |
+| Echo (Story) | 100 |
+| Magnitude factor | 0.58 |
+
+**Top mood tokens**
+
+`LUL` Ã—48 Â· `LMAO` Ã—11 Â· `KEKW` Ã—7 Â· `HAHA` Ã—3 Â· `LMFAO` Ã—3 Â· `SAME` Ã—3 Â· `BALD` Ã—2 Â· `ICANT` Ã—1
+
+**Sample messages**
+
+| +mm:ss | user | message |
+|---|---|---|
+| +00:01 | stickkillur | based let him keep it he risked his life senators don’t and we let the@ inside trade such as Nancy pelsoi who is statistically the best stoc |
+| +00:08 | TheNomOrb | lmao |
+| +00:13 | ShadowmageS | They should drive up the price of nuking a nation as a headfake. |
+| +00:18 | ithricks | USA USA USA |
+| +00:26 | drageste | If he bet they couldn't get him he will lose his job hahahaa |
+| +00:33 | Malcolmmkmk | if he is betting against and it will be a hugger problem |
+| +00:41 | infinitereruns | W |
+| +00:44 | rico445z | BSED |
+| +00:48 | Syndread | Congress does the same shit basically |
+| +00:54 | AdamSzzz_ | That would be crazy |
+
+---
+
+## #8 Â· 60/100 Â· 1:18:00 Â· HYPE *(merged #15, #14)*
+
+**Cut window:** `1:17:39 â†’ 1:20:08`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 1.1Ã— velocity Â· p83 heatmap Â· 1.3x local heat Â· HYPE (0.42) Â· Story echo 0.70 Â· p64 volume  
+**Segment:** Just Chatting  
+
+| Metric | Score |
+|---|---|
+| Velocity 1.1Ã— | 5 |
+| Heatmap p83 / 1.3x local | 67 |
+| Mood (HYPE) | 84 |
+| Echo (Story) | 100 |
+| Magnitude factor | 0.65 |
+
+**Top mood tokens**
+
+`BASED` Ã—72 Â· `POG` Ã—20 Â· `GIGACHAD` Ã—18 Â· `CINEMA` Ã—17 Â· `W` Ã—9 Â· `BIG` Ã—5 Â· `LETSGO` Ã—2 Â· `WW` Ã—1 Â· `AURA` Ã—1
+
+**Sample messages**
+
+| +mm:ss | user | message |
+|---|---|---|
+| +00:00 | buxbaum110 | Based |
+| +00:15 | MarsKnightmare | W |
+| +00:26 | mincoooooo | WW |
+| +00:37 | silvercoin1234 | BASED |
+| +00:48 | mursieftw | Captain HUNG COW |
+| +01:01 | docvanndamme | @zackrawrr makes me want to find a way back in 😂 |
+| +01:30 | phorealtft | wat |
+| +01:38 | Driix6 | OH BABY |
+| +01:51 | BoomDada_ | no way |
+| +02:04 | dryfunkle | let me make popcorn hold on |
+
+---
+
+## #9 Â· 55/100 Â· 1:11:00 Â· FUNNY
+
+**Cut window:** `1:10:28 â†’ 1:12:16`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 1.5Ã— velocity Â· p89 heatmap Â· 1.3x local heat Â· FUNNY (0.28) Â· Story echo 0.89 Â· p70 volume  
+**Segment:** Just Chatting  
+
+| Metric | Score |
+|---|---|
+| Velocity 1.5Ã— | 13 |
+| Heatmap p89 / 1.3x local | 72 |
+| Mood (FUNNY) | 56 |
 | Echo (Story) | 100 |
 | Magnitude factor | 0.71 |
 
 **Top mood tokens**
 
-`BRO` ×11 · `WHAT` ×11 · `HOLY` ×6 · `WTF` ×2 · `MONKAW` ×2 · `HUH` ×1 · `MONKAS` ×1
+`LUL` Ã—21 Â· `LMAO` Ã—6 Â· `KEKW` Ã—3 Â· `SAME` Ã—3 Â· `HAHA` Ã—2 Â· `XD` Ã—1 Â· `OMEGALUL` Ã—1
 
 **Sample messages**
 
@@ -209,34 +329,36 @@ Algorithm: Velocity (37.5%) · Mood (37.5%) · Echo (25%) × Magnitude scaler
 
 ---
 
-## #7 · 48/100 · 1:18:00 · HYPE *(merged #15, #14)*
+## #10 Â· 52/100 Â· 1:07:00 Â· SHOCK
 
-**Cut window:** `1:17:39 → 1:20:08`  
-**Reasoning:** 1.1× velocity · HYPE (0.42) · Story echo 0.70 · p64 volume  
+**Cut window:** `1:06:56 â†’ 1:07:26`  
+**Mood lexicon:** zackrawrr  
+**Reasoning:** 1.0Ã— velocity Â· p77 heatmap Â· 1.0x local heat Â· SHOCK (0.34) Â· Story echo 0.95 Â· p58 volume  
 **Segment:** Just Chatting  
 
-| Pillar | Score |
+| Metric | Score |
 |---|---|
-| Velocity 1.1× | 5 |
-| Mood (HYPE) | 84 |
+| Velocity 1.0Ã— | 0 |
+| Heatmap p77 / 1.0x local | 60 |
+| Mood (SHOCK) | 68 |
 | Echo (Story) | 100 |
-| Magnitude factor | 0.65 |
+| Magnitude factor | 0.58 |
 
 **Top mood tokens**
 
-`BASED` ×72 · `POG` ×20 · `GIGACHAD` ×18 · `CINEMA` ×17 · `W` ×9 · `BIG` ×5 · `LETSGO` ×2 · `WW` ×1 · `AURA` ×1
+`BRO` Ã—3 Â· `WHAT` Ã—3 Â· `NAHHH` Ã—1 Â· `NAH` Ã—1
 
 **Sample messages**
 
 | +mm:ss | user | message |
 |---|---|---|
-| +00:00 | buxbaum110 | Based |
-| +00:15 | MarsKnightmare | W |
-| +00:26 | mincoooooo | WW |
-| +00:37 | silvercoin1234 | BASED |
-| +00:48 | mursieftw | Captain HUNG COW |
-| +01:01 | docvanndamme | @zackrawrr makes me want to find a way back in 😂 |
-| +01:30 | phorealtft | wat |
-| +01:38 | Driix6 | OH BABY |
-| +01:51 | BoomDada_ | no way |
-| +02:04 | dryfunkle | let me make popcorn hold on |
+| +00:00 | TheSgtButters | have we looked at the whole RFK 600% retarded stuff ?? |
+| +00:05 | BakaBakashiii | its more OPSEC issues |
+| +00:08 | CarRacer | gambler's ruin is a mathematical concept |
+| +00:11 | J0eyRavi0li | UHHH, GROK ADURRRR |
+| +00:14 | NanoTyrannus89 | LMAO |
+| +00:17 | Malcolmmkmk | poor bitch |
+| +00:20 | AlexRekzu | How to INVEST $1000 |
+| +00:22 | smokedshrimps | Bet it all on black EZ |
+| +00:24 | Xaecirce | NotLikeThis NotLikeThis |
+| +00:26 | Zinji_3 | GAMBAADDICT |

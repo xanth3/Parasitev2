@@ -1,9 +1,9 @@
-rank,virality,timestamp,cut_window,mood,echo_label,velocity_x,magnitude,segment,reasoning
-1,65,0:20:00,0:19:49 → 0:21:57,SHOCK,Lingering,2.0×,0.98,Assassin's Creed Black Flag Resynced,2.0× velocity · SHOCK (0.55) · Lingering echo 0.51 · p98 volume
-2,62,0:30:00,0:27:45 → 0:32:15,SHOCK,Story,1.4×,0.88,,1.4× velocity · SHOCK (0.48) · Story echo 0.76 · p88 volume
-3,59,0:47:00,0:46:39 → 0:49:39,HYPE,Story,1.6×,0.80,,1.6× velocity · HYPE (0.50) · Story echo 0.61 · p79 volume
-4,58,0:16:00,0:15:53 → 0:17:16,FUNNY,Lingering,1.9×,1.00,Assassin's Creed Black Flag Resynced,1.9× velocity · FUNNY (0.52) · Lingering echo 0.34 · p100 volume
-5,58,0:25:00,0:24:47 → 0:26:58,FUNNY,Story,1.4×,0.74,,1.4× velocity · FUNNY (0.77) · Story echo 0.70 · p74 volume
-6,57,0:11:00,0:09:25 → 0:13:29,FUNNY,Story,1.6×,0.68,Assassin's Creed Black Flag Resynced,1.6× velocity · FUNNY (0.54) · Story echo 0.93 · p67 volume
-7,51,0:42:00,0:41:46 → 0:44:01,SHOCK,Story,1.5×,0.67,,1.5× velocity · SHOCK (0.42) · Story echo 0.70 · p67 volume
-8,32,0:52:00,0:51:33 → 0:52:43,SHOCK,Jump Scare,1.2×,0.61,,1.2× velocity · SHOCK (0.53) · Jump Scare echo 0.00 · p60 volume
+rank,virality,timestamp,seconds,cut_start,cut_end,cut_window,mood,echo_label,velocity_x,magnitude,segment,reasoning
+1,65,0:20:00,1200,1189,1317,0:19:49 → 0:21:57,SHOCK,Lingering,2.0×,0.98,Assassin's Creed Black Flag Resynced,2.0× velocity · SHOCK (0.55) · Lingering echo 0.51 · p98 volume
+2,62,0:30:00,1800,1665,1935,0:27:45 → 0:32:15,SHOCK,Story,1.4×,0.88,,1.4× velocity · SHOCK (0.48) · Story echo 0.76 · p88 volume
+3,59,0:47:00,2820,2799,2979,0:46:39 → 0:49:39,HYPE,Story,1.6×,0.80,,1.6× velocity · HYPE (0.50) · Story echo 0.61 · p79 volume
+4,58,0:16:00,960,953,1036,0:15:53 → 0:17:16,FUNNY,Lingering,1.9×,1.00,Assassin's Creed Black Flag Resynced,1.9× velocity · FUNNY (0.52) · Lingering echo 0.34 · p100 volume
+5,58,0:25:00,1500,1487,1618,0:24:47 → 0:26:58,FUNNY,Story,1.4×,0.74,,1.4× velocity · FUNNY (0.77) · Story echo 0.70 · p74 volume
+6,57,0:11:00,660,565,809,0:09:25 → 0:13:29,FUNNY,Story,1.6×,0.68,Assassin's Creed Black Flag Resynced,1.6× velocity · FUNNY (0.54) · Story echo 0.93 · p67 volume
+7,51,0:42:00,2520,2506,2641,0:41:46 → 0:44:01,SHOCK,Story,1.5×,0.67,,1.5× velocity · SHOCK (0.42) · Story echo 0.70 · p67 volume
+8,32,0:52:00,3120,3093,3163,0:51:33 → 0:52:43,SHOCK,Jump Scare,1.2×,0.61,,1.2× velocity · SHOCK (0.53) · Jump Scare echo 0.00 · p60 volume

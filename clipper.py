@@ -72,6 +72,7 @@ from export_top_clips import (
     generate_description,
     generate_title,
     get_video_resolution,
+    infer_vod_folder,
     is_url,
     load_score_rows,
     resolve_video_source,
@@ -347,26 +348,32 @@ def write_chat_crawl_ass(
     play_res_x: int = 1920,
     play_res_y: int = 1080,
 ) -> Path:
-    """Horizontal scrolling chat messages across the mid-band of the frame.
+    """Rolling chat stack overlay — messages stack upward like Twitch chat.
 
-    Uses ASS \\move() for right-to-left traversal. Crimson primary with silver
-    glow outline. Only emits messages during HYPE/FUNNY mood windows.
+    New messages appear at the bottom of the stack and push older ones up.
+    Uses snapshot-interval rendering (same approach as export_top_clips chat
+    overlay) with \\pos() for static positioning. Crimson primary with silver
+    glow outline.
     """
     duration = max(0.1, end - start)
     font_size = int(getattr(args, "chat_crawl_font_size", 38))
-    speed = max(2.0, float(getattr(args, "chat_crawl_speed", 6.0)))
-    max_concurrent = max(1, int(getattr(args, "chat_crawl_max_concurrent", 3)))
-    max_per_second = max(1, int(getattr(args, "chat_crawl_max_per_second", 2)))
+    hold = max(2.0, float(getattr(args, "chat_crawl_speed", 6.0)))
+    max_lines = max(1, int(getattr(args, "chat_crawl_max_concurrent", 8)))
+    max_per_second = max(1, int(getattr(args, "chat_crawl_max_per_second", 3)))
+    line_h = font_size + 10
 
-    # Crawl y position: just below vertical center
-    crawl_y = int(play_res_y * 0.52)
+    # Stack zone: top-left area of the frame (like Twitch chat)
+    stack_x = int(play_res_x * 0.01)
+    stack_y_top = int(play_res_y * 0.02)
+    stack_height = max_lines * line_h
+    clip_bottom = stack_y_top + stack_height
 
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
         f"PlayResX: {play_res_x}",
         f"PlayResY: {play_res_y}",
-        "WrapStyle: 2",
+        "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
@@ -378,8 +385,8 @@ def write_chat_crawl_ass(
         ),
         (
             f"Style: Crawl,Arial,{font_size},{CRIMSON_PRIMARY},&H000000FF,"
-            f"{SILVER_OUTLINE},&H00000000,-1,0,0,0,100,100,0,0,1,4,2,"
-            "5,0,0,0,1"
+            f"{SILVER_OUTLINE},&H00000000,-1,0,0,0,100,100,0,0,1,3,1,"
+            "7,0,0,0,1"
         ),
         "",
         "[Events]",
@@ -401,8 +408,12 @@ def write_chat_crawl_ass(
             continue
         user = _ass_escape(_comment_user(comment, idx))
         rel = max(0.0, float(off - start))
+        rel_end = min(duration, rel + hold)
+        if rel_end <= rel:
+            continue
         feed.append({
             "rel": rel,
+            "end": rel_end,
             "user": user,
             "body": body,
             "color": _ass_color_for_user(user),
@@ -411,36 +422,35 @@ def write_chat_crawl_ass(
 
     feed.sort(key=lambda m: m["rel"])
 
-    # Emit scrolling dialogue events
-    active_count: dict[int, int] = defaultdict(int)  # second -> concurrent
-    for msg in feed:
-        rel = msg["rel"]
-        rel_end = min(duration, rel + speed)
-        if rel_end <= rel:
-            continue
-        # Limit concurrency
-        sec = int(rel)
-        if active_count[sec] >= max_concurrent:
-            continue
-        for s in range(sec, min(int(rel_end) + 1, int(duration) + 1)):
-            active_count[s] += 1
+    # Snapshot-interval rendering: at each breakpoint, render the visible
+    # stack with newest at the bottom, older messages pushed upward.
+    if feed:
+        breakpoints = {0.0, duration}
+        for msg in feed:
+            breakpoints.add(round(float(msg["rel"]), 3))
+            breakpoints.add(round(float(msg["end"]), 3))
+        ordered = sorted(bp for bp in breakpoints if 0.0 <= bp <= duration)
 
-        # Stagger vertical position to avoid overlap
-        row_offset = active_count[sec] - 1
-        y_pos = crawl_y + row_offset * (font_size + 12)
-
-        # \move(start_x, y, end_x, y) -- right to left
-        start_x = play_res_x + 20
-        end_x = -(len(msg["body"]) * font_size)  # offscreen left
-        text = (
-            rf"{{\move({start_x},{y_pos},{end_x},{y_pos})"
-            rf"\c{msg['color']}}}{msg['user']}: "
-            rf"{{\c{CRIMSON_PRIMARY}}}{msg['body']}"
-        )
-        lines.append(
-            f"Dialogue: 5,{_ass_time(rel)},{_ass_time(rel_end)},"
-            f"Crawl,,0,0,0,,{text}"
-        )
+        for iv_start, iv_end in zip(ordered, ordered[1:]):
+            if iv_end - iv_start < 0.01:
+                continue
+            active = [
+                m for m in feed
+                if m["rel"] <= iv_start < m["end"]
+            ]
+            visible = active[-max_lines:]
+            for row, msg in enumerate(visible):
+                row_y = stack_y_top + row * line_h
+                text = (
+                    rf"{{\clip({stack_x},{stack_y_top},{play_res_x},{clip_bottom})"
+                    rf"\pos({stack_x},{row_y})"
+                    rf"\c{msg['color']}}}{msg['user']} "
+                    rf"{{\c{CRIMSON_PRIMARY}}}{msg['body']}"
+                )
+                lines.append(
+                    f"Dialogue: 5,{_ass_time(iv_start)},{_ass_time(iv_end)},"
+                    f"Crawl,,0,0,0,,{text}"
+                )
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out_path
@@ -695,6 +705,7 @@ def _print_summary(result: dict, raw_mode: bool):
         mode = _c(_SILVER, "raw") if raw_mode else _c(_CRIMSON, "codex")
         print(f"\n  {_BLOOD}{'=' * 44}{_RESET}")
         print(f"  {label} {_c(_FANG, str(count))} clip(s) {_c(_DIM, '-')} mode: {mode}")
+        print(f"  {_c(_DIM, 'video')} {_c(_SILVER, result.get('video_source_kind') or 'unknown')} {_c(_DIM, result.get('source_video') or '')}")
         print(f"  {_c(_DIM, out)}")
         print(f"  {_BLOOD}{'=' * 44}{_RESET}\n")
     else:
@@ -702,6 +713,7 @@ def _print_summary(result: dict, raw_mode: bool):
         mode = "raw" if raw_mode else "codex"
         print(f"\n{'=' * 44}")
         print(f"{label}: {count} clip(s) - mode: {mode}")
+        print(f"video: {result.get('video_source_kind') or 'unknown'} {result.get('source_video') or ''}")
         print(out)
         print(f"{'=' * 44}\n")
 
@@ -714,9 +726,17 @@ def export_codex_clips(args) -> dict:
     """Cut and process clips with Codex visual style."""
     args.scores = Path(args.scores)
     args.chat = Path(args.chat)
-    args.video, args.video_is_local = resolve_video_source(args.video, args.scores)
+    args.video, args.video_is_local, args.video_source_kind = resolve_video_source(
+        args.video,
+        args.scores,
+        require_local=bool(getattr(args, "require_local_video", False)),
+        allow_twitch_fallback=bool(getattr(args, "allow_twitch_fallback", True)),
+    )
     original_video = args.video
     out_dir = Path(args.out).expanduser()
+    vod_folder = infer_vod_folder(args.scores)
+    if vod_folder:
+        out_dir = out_dir / vod_folder
     layout = build_output_layout(out_dir, flat=getattr(args, "flat_output", False))
 
     raw_mode = bool(getattr(args, "raw", False))
@@ -1039,6 +1059,7 @@ def export_codex_clips(args) -> dict:
         "dry_run": args.dry_run,
         "raw": raw_mode,
         "source_video": str(original_video),
+        "video_source_kind": str(getattr(args, "video_source_kind", "")),
         "warnings": warnings,
         "clip_count": len(clips),
         "clips": clips,
@@ -1061,9 +1082,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("scores", help="Path to viral_score.csv")
     p.add_argument("--chat", required=True, help="Path to chat.json")
-    p.add_argument("--video", required=True, help="Path to source VOD video or Twitch URL")
+    p.add_argument("--video", default="", help="Path to source VOD video, Twitch URL, or empty to infer/search Desktop/VODs")
+    p.add_argument("--require-local-video", action="store_true",
+                   help="Fail if the raw VOD is not found in ~/Desktop/VODs or VODS_DIR")
+    p.add_argument("--allow-twitch-fallback", action=argparse.BooleanOptionalAction, default=True,
+                   help="Allow Twitch URL fallback when no local raw VOD is found")
     p.add_argument("--top", type=int, default=5)
-    p.add_argument("--from-top", type=int, default=15)
+    p.add_argument("--from-top", type=int, default=20)
     p.add_argument("--pad", type=int, default=10)
     p.add_argument("--analysis-pad", type=int, default=None)
     p.add_argument("--out", default=str(CODEX_OUT_DIR))

@@ -195,7 +195,9 @@ class _VampSpinner:
         self._thread = None
         self._t0 = 0.0
 
-    def start(self):
+    def start(self, label: str = ""):
+        if label:
+            self._label = label
         if not self._enabled or self._running:
             return
         self._t0 = time.time()
@@ -217,6 +219,9 @@ class _VampSpinner:
         except Exception:
             pass
         return elapsed
+
+    def update_label(self, label: str):
+        self._label = label
 
     def _fmt_time(self, secs: float) -> str:
         if secs < 60:
@@ -283,7 +288,7 @@ from heatmap import (
     hms,
     load_comments,
 )
-from peaks_detail import tokens_in
+from peaks_detail import tokens_in, load_peaks as _load_peaks
 from viral_score import (
     score_from_paths as _vs_score_paths,
     write_csv as _vs_write_csv,
@@ -339,8 +344,8 @@ def _download_video(vod_id: str) -> "str | None":
         return str(existing)
     VODS_DIR.mkdir(parents=True, exist_ok=True)
     url = f"https://www.twitch.tv/videos/{vod_id}"
-    tmpl = str(VODS_DIR / "%(uploader_id)s_%(upload_date)s_v%(id)s.%(ext)s")
-    cmd = ["yt-dlp", "-o", tmpl, "--no-progress", "--concurrent-fragments", "8", url]
+    tmpl = str(VODS_DIR / "%(uploader_id)s_%(upload_date)s_%(id)s.%(ext)s")
+    cmd = [sys.executable, "-m", "yt_dlp", "-o", tmpl, "--no-progress", "--concurrent-fragments", "8", url]
     try:
         print(f"    [downloading video → {VODS_DIR}… this may take a while]", flush=True)
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=14400)
@@ -616,7 +621,7 @@ def tool_list_vods():
     return {"vods": vods}
 
 
-def tool_get_peaks(vod_id, bin_size=60, top=15, min_msgs=0):
+def tool_get_peaks(vod_id, bin_size=60, top=20, min_msgs=0):
     path = chat_path(vod_id)
     if not path:
         return {"error": f"No chat cached for VOD {vod_id}. Call fetch_vod first."}
@@ -809,7 +814,7 @@ def tool_open_heatmap(vod_id):
         return {"error": f"could not open heatmap: {e}", "path": str(png)}
 
 
-def tool_get_virality(vod_id, top=15, bin_size=60):
+def tool_get_virality(vod_id, top=20, bin_size=60):
     """Score VOD peaks with the Siphon engine. Writes viral_score.csv + siphon_report.md."""
     cp = chat_path(vod_id)
     if not cp:
@@ -818,8 +823,15 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
     d = vod_archive_dir(vod_id)
     peaks_p = (d / "peaks.csv") if d else Path(f"peaks_{vod_id}.csv")
 
-    # Generate peaks.csv if it doesn't exist yet
-    if not peaks_p.exists():
+    # Generate peaks.csv if it doesn't exist yet, or if an older run only
+    # captured fewer peaks than the current scoring depth.
+    needs_peaks = not peaks_p.exists()
+    if not needs_peaks:
+        try:
+            needs_peaks = len(_load_peaks(peaks_p)) < int(top)
+        except Exception:
+            needs_peaks = True
+    if needs_peaks:
         png_p = heatmap_path(vod_id)
         cmd = [sys.executable, "heatmap.py", str(cp),
                "--out", str(png_p), "--top", str(top),
@@ -852,8 +864,13 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
             "timestamp":          p["timestamp"],
             "cut_window":         p["cut_window"],
             "mood":               p["mood"],
+            "mood_lexicon":       p.get("mood_lexicon"),
             "echo_label":         p["echo_label"],
             "velocity_multiplier": p["velocity_multiplier"],
+            "heatmap_score":      p.get("heatmap_score"),
+            "heatmap_count":      p.get("heatmap_count"),
+            "heatmap_percentile": p.get("heatmap_percentile"),
+            "heatmap_prominence": p.get("heatmap_prominence"),
             "segment":            p["segment"],
             "reasoning":          p["reasoning"],
             "merged_peaks":       p["merged_peaks"],
@@ -864,11 +881,16 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
     velocities = [float(p.get("velocity_multiplier") or 0) for p in scored]
     avg_velocity = round(sum(velocities) / len(velocities), 2) if velocities else 0
     highest_velocity = round(max(velocities), 2) if velocities else 0
+    heatmaps = [float(p.get("heatmap_score") or 0) for p in scored]
+    avg_heatmap = round(sum(heatmaps) / len(heatmaps), 1) if heatmaps else 0
+    highest_heatmap = round(max(heatmaps), 1) if heatmaps else 0
     return {
         "vod_id": vod_id,
         "average_score": avg_score,
         "average_velocity": avg_velocity,
         "highest_velocity": highest_velocity,
+        "average_heatmap": avg_heatmap,
+        "highest_heatmap": highest_heatmap,
         "clips": clips,
         "artifacts": {
             "viral_score_csv":   str(d / "viral_score.csv") if d else None,
@@ -877,7 +899,7 @@ def tool_get_virality(vod_id, top=15, bin_size=60):
     }
 
 
-def tool_best_scores(top=15, bin_size=60, limit=0):
+def tool_best_scores(top=20, bin_size=60, limit=0):
     """Score every archived VOD and return the highest-scored moment from each."""
     vods = tool_list_vods().get("vods", [])
     if limit and limit > 0:
@@ -910,6 +932,8 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
         avg_score = scored.get("average_score")
         avg_velocity = scored.get("average_velocity")
         highest_velocity = scored.get("highest_velocity")
+        avg_heatmap = scored.get("average_heatmap")
+        highest_heatmap = scored.get("highest_heatmap")
         results.append({
             "vod_id": vod_id,
             "streamer": v.get("streamer"),
@@ -923,9 +947,16 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
             "velocity_multiplier": best.get("velocity_multiplier"),
             "average_velocity": avg_velocity,
             "highest_velocity": highest_velocity,
+            "heatmap_score": best.get("heatmap_score"),
+            "heatmap_count": best.get("heatmap_count"),
+            "heatmap_percentile": best.get("heatmap_percentile"),
+            "heatmap_prominence": best.get("heatmap_prominence"),
+            "average_heatmap": avg_heatmap,
+            "highest_heatmap": highest_heatmap,
             "timestamp": best.get("timestamp"),
             "cut_window": best.get("cut_window"),
             "mood": best.get("mood"),
+            "mood_lexicon": best.get("mood_lexicon"),
             "echo_label": best.get("echo_label"),
             "segment": best.get("segment"),
             "reasoning": best.get("reasoning"),
@@ -942,7 +973,7 @@ def tool_best_scores(top=15, bin_size=60, limit=0):
     }
 
 
-def tool_average_scores(top=15, bin_size=60, limit=0):
+def tool_average_scores(top=20, bin_size=60, limit=0):
     """Score every archived VOD and return the average Siphon score per VOD."""
     vods = tool_list_vods().get("vods", [])
     if limit and limit > 0:
@@ -981,8 +1012,11 @@ def tool_average_scores(top=15, bin_size=60, limit=0):
             "average_score": scored.get("average_score"),
             "average_velocity": scored.get("average_velocity"),
             "highest_velocity": scored.get("highest_velocity"),
+            "average_heatmap": scored.get("average_heatmap"),
+            "highest_heatmap": scored.get("highest_heatmap"),
             "best_score": clips[0].get("virality"),
             "best_velocity": clips[0].get("velocity_multiplier"),
+            "best_heatmap": clips[0].get("heatmap_score"),
             "best_timestamp": clips[0].get("timestamp"),
             "archive_dir": v.get("archive_dir"),
         })
@@ -1000,7 +1034,7 @@ def tool_average_scores(top=15, bin_size=60, limit=0):
 def tool_export_top_clips(
     vod_id,
     top=5,
-    from_top=15,
+    from_top=20,
     pad=10,
     fast=False,
     thumbnail=True,
@@ -1009,6 +1043,8 @@ def tool_export_top_clips(
     subtitle_model="tiny",
     subtitle_language=None,
     subtitle_font_size=28,
+    require_local_video=False,
+    allow_twitch_fallback=True,
 ):
     """Export the best scored Siphon clips for a VOD to ~/Desktop/VODClips."""
     d = vod_archive_dir(vod_id)
@@ -1018,7 +1054,7 @@ def tool_export_top_clips(
 
     scores = d / "viral_score.csv"
     if not scores.exists():
-        scored = tool_get_virality(vod_id, top=max(int(from_top), 15))
+        scored = tool_get_virality(vod_id, top=max(int(from_top), 20))
         if "error" in scored:
             return scored
     if not scores.exists():
@@ -1032,6 +1068,8 @@ def tool_export_top_clips(
             scores=scores,
             chat=cp,
             video=video,
+            require_local_video=bool(require_local_video),
+            allow_twitch_fallback=bool(allow_twitch_fallback),
             top=int(top),
             from_top=int(from_top),
             pad=int(pad),
@@ -1100,7 +1138,8 @@ def tool_export_top_clips(
         })
     return {
         "vod_id": vod_id,
-        "source_video": video,
+        "source_video": result.get("source_video") or video,
+        "video_source_kind": result.get("video_source_kind"),
         "output_dir": result.get("output_dir"),
         "clips": exported,
     }
@@ -1109,7 +1148,7 @@ def tool_export_top_clips(
 def tool_export_codex_clips(
     vod_id,
     top=5,
-    from_top=15,
+    from_top=20,
     pad=10,
     drama_zoom=True,
     chat_crawl=True,
@@ -1117,6 +1156,8 @@ def tool_export_codex_clips(
     vertical=False,
     logo=None,
     raw=False,
+    require_local_video=False,
+    allow_twitch_fallback=True,
 ):
     """Export Codex-styled clips: drama zoom, chat crawl, optional vertical."""
     d = vod_archive_dir(vod_id)
@@ -1126,7 +1167,7 @@ def tool_export_codex_clips(
 
     scores = d / "viral_score.csv"
     if not scores.exists():
-        scored = tool_get_virality(vod_id, top=max(int(from_top), 15))
+        scored = tool_get_virality(vod_id, top=max(int(from_top), 20))
         if "error" in scored:
             return scored
     if not scores.exists():
@@ -1140,6 +1181,8 @@ def tool_export_codex_clips(
             scores=scores,
             chat=cp,
             video=video,
+            require_local_video=bool(require_local_video),
+            allow_twitch_fallback=bool(allow_twitch_fallback),
             top=int(top),
             from_top=int(from_top),
             pad=int(pad),
@@ -1202,7 +1245,8 @@ def tool_export_codex_clips(
         })
     return {
         "vod_id": vod_id,
-        "source_video": video,
+        "source_video": result.get("source_video") or video,
+        "video_source_kind": result.get("video_source_kind"),
         "output_dir": result.get("output_dir"),
         "clips": exported,
     }
@@ -1259,7 +1303,7 @@ TOOLS = [
             "properties": {
                 "vod_id": {"type": "string", "description": "VOD numeric ID"},
                 "bin_size": {"type": "integer", "description": "Bucket size in seconds", "default": 60},
-                "top": {"type": "integer", "description": "How many peaks", "default": 15},
+                "top": {"type": "integer", "description": "How many peaks", "default": 20},
                 "min_msgs": {"type": "integer", "description": "Minimum msgs per bucket to rank", "default": 0},
             },
             "required": ["vod_id"],
@@ -1272,7 +1316,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "vod_id":   {"type": "string", "description": "VOD numeric ID"},
-                "top":      {"type": "integer", "description": "How many top peaks to score", "default": 15},
+                "top":      {"type": "integer", "description": "How many top peaks to score", "default": 20},
                 "bin_size": {"type": "integer", "description": "Bucket size in seconds for peak detection", "default": 60},
             },
             "required": ["vod_id"],
@@ -1284,7 +1328,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "top": {"type": "integer", "description": "How many peaks to score inside each VOD", "default": 15},
+                "top": {"type": "integer", "description": "How many peaks to score inside each VOD", "default": 20},
                 "bin_size": {"type": "integer", "description": "Heatmap bucket size in seconds", "default": 60},
                 "limit": {"type": "integer", "description": "Optional max number of archived VODs to scan; 0 means all", "default": 0},
             },
@@ -1296,7 +1340,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "top": {"type": "integer", "description": "How many peaks to score inside each VOD", "default": 15},
+                "top": {"type": "integer", "description": "How many peaks to score inside each VOD", "default": 20},
                 "bin_size": {"type": "integer", "description": "Heatmap bucket size in seconds", "default": 60},
                 "limit": {"type": "integer", "description": "Optional max number of archived VODs to scan; 0 means all", "default": 0},
             },
@@ -1310,7 +1354,7 @@ TOOLS = [
             "properties": {
                 "vod_id": {"type": "string", "description": "VOD numeric ID"},
                 "top": {"type": "integer", "description": "Number of clips to export", "default": 5},
-                "from_top": {"type": "integer", "description": "Pool size from viral_score.csv", "default": 15},
+                "from_top": {"type": "integer", "description": "Pool size from viral_score.csv", "default": 20},
                 "pad": {"type": "integer", "description": "Seconds before/after peak", "default": 10},
                 "fast": {"type": "boolean", "description": "Use ffmpeg stream copy", "default": False},
                 "thumbnail": {"type": "boolean", "description": "Export JPG thumbnails", "default": True},
@@ -1319,6 +1363,8 @@ TOOLS = [
                 "subtitle_model": {"type": "string", "description": "faster-whisper model, e.g. tiny, base, small", "default": "tiny"},
                 "subtitle_language": {"type": "string", "description": "Optional language code such as en"},
                 "subtitle_font_size": {"type": "integer", "description": "Burned subtitle font size", "default": 28},
+                "require_local_video": {"type": "boolean", "description": "Fail instead of falling back to Twitch when no raw VOD is found in VODS_DIR", "default": False},
+                "allow_twitch_fallback": {"type": "boolean", "description": "Allow Twitch URL fallback when local raw VOD is missing", "default": True},
             },
             "required": ["vod_id"],
         },
@@ -1331,12 +1377,16 @@ TOOLS = [
             "properties": {
                 "vod_id": {"type": "string", "description": "VOD numeric ID"},
                 "top": {"type": "integer", "description": "Number of clips to export", "default": 5},
+                "from_top": {"type": "integer", "description": "Pool size from viral_score.csv", "default": 20},
+                "pad": {"type": "integer", "description": "Seconds before/after peak", "default": 10},
                 "drama_zoom": {"type": "boolean", "description": "Face punch-in on SHOCK/DRAMA peaks", "default": True},
                 "chat_crawl": {"type": "boolean", "description": "Thumerian chat crawl on HYPE/FUNNY peaks", "default": True},
                 "speech_subtitles": {"type": "boolean", "description": "Generate and burn speech-to-text captions", "default": False},
                 "vertical": {"type": "boolean", "description": "Also produce 9:16 vertical clips", "default": False},
                 "logo": {"type": "string", "description": "Path to logo PNG for watermark"},
                 "raw": {"type": "boolean", "description": "Raw mode: clean cuts with zero post-processing (stream copy, no effects)", "default": False},
+                "require_local_video": {"type": "boolean", "description": "Fail instead of falling back to Twitch when no raw VOD is found in VODS_DIR", "default": False},
+                "allow_twitch_fallback": {"type": "boolean", "description": "Allow Twitch URL fallback when local raw VOD is missing", "default": True},
             },
             "required": ["vod_id"],
         },
@@ -1585,11 +1635,16 @@ def _print_tool_result(result: dict) -> None:
             velocity = r.get("velocity_multiplier") or 0
             avg_velocity = r.get("average_velocity") or 0
             highest_velocity = r.get("highest_velocity") or 0
+            heatmap = r.get("heatmap_score") or 0
+            avg_heatmap = r.get("average_heatmap") or 0
+            highest_heatmap = r.get("highest_heatmap") or 0
             sc = _CRIMSON if score >= 85 else _EMBER if score >= 60 else _DIM
             print(f"  {sc}{score:3}/100{_RST}  {_EMBER}{r.get('vod_id')}{_RST}  "
                   f"{_SILVER}{r.get('timestamp')}{_RST}  {_DIM}{r.get('upload_date') or ''}{_RST}  "
                   f"{_SILVER}{r.get('mood') or 'UNKNOWN':<7}{_RST}  "
-                  f"{_DIM}V: {velocity:.1f}x (A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x){_RST}  "
+                  f"{_DIM}Lexicon: {r.get('mood_lexicon') or 'base'}{_RST}  "
+                  f"{_DIM}Velocity: {velocity:.1f}x (A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x){_RST}  "
+                  f"{_DIM}Heatmap: {heatmap:.0f} (A: {avg_heatmap:.1f} ^: {highest_heatmap:.0f}){_RST}  "
                   f"{r.get('cut_window') or ''}")
             if avg is not None:
                 print(f"      {_SILVER}Avg. Score: {avg}{_RST}")
@@ -1609,10 +1664,13 @@ def _print_tool_result(result: dict) -> None:
             avg = r.get("average_score") or 0
             avg_velocity = r.get("average_velocity") or 0
             highest_velocity = r.get("highest_velocity") or 0
+            avg_heatmap = r.get("average_heatmap") or 0
+            highest_heatmap = r.get("highest_heatmap") or 0
             sc = _CRIMSON if avg >= 85 else _EMBER if avg >= 60 else _DIM
             print(f"  {_EMBER}{r.get('vod_id')}{_RST}  {_DIM}{r.get('upload_date') or ''}{_RST}  "
                   f"{sc}Avg. Score: {avg}{_RST}  "
-                  f"{_DIM}V: A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x{_RST}  "
+                  f"{_DIM}Velocity: A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x{_RST}  "
+                  f"{_DIM}Heatmap: A: {avg_heatmap:.1f} ^: {highest_heatmap:.0f}{_RST}  "
                   f"{_SILVER}Best: {r.get('best_score')}/100 @ {r.get('best_timestamp')}{_RST}")
         errors = result.get("errors") or []
         if errors:
@@ -1647,6 +1705,8 @@ def _print_tool_result(result: dict) -> None:
             print(f"  {_SILVER}Avg. Score: {result['average_score']}{_RST}")
         avg_velocity = result.get("average_velocity") or 0
         highest_velocity = result.get("highest_velocity") or 0
+        avg_heatmap = result.get("average_heatmap") or 0
+        highest_heatmap = result.get("highest_heatmap") or 0
         for c in result["clips"]:
             if "rank" in c:
                 score = c['virality']
@@ -1654,8 +1714,11 @@ def _print_tool_result(result: dict) -> None:
                 print(f"  {_CRIMSON}#{c['rank']:2}{_RST}  {sc}{score:3}/100{_RST}  "
                       f"{_EMBER}{c['cut_window']}{_RST}  "
                       f"{_SILVER}{c['mood']:<7}{_RST}  {_DIM}{c['echo_label']:<12}{_RST}  "
-                      f"{_DIM}V: {float(c.get('velocity_multiplier') or 0):.1f}x "
+                      f"{_DIM}Lexicon: {c.get('mood_lexicon') or 'base'}{_RST}  "
+                      f"{_DIM}Velocity: {float(c.get('velocity_multiplier') or 0):.1f}x "
                       f"(A: {avg_velocity:.1f}x ^: {highest_velocity:.1f}x){_RST}  "
+                      f"{_DIM}Heatmap: {float(c.get('heatmap_score') or 0):.0f} "
+                      f"(A: {avg_heatmap:.1f} ^: {highest_heatmap:.0f}){_RST}  "
                       f"{_DIM}{c['reasoning']}{_RST}")
             else:
                 score = c.get('score', 0) or 0
@@ -1683,7 +1746,7 @@ def _parse_manual_export_args(rest: str) -> dict | None:
     parser = argparse.ArgumentParser(prog="export", add_help=False)
     parser.add_argument("vod_id")
     parser.add_argument("top", nargs="?", type=int, default=5)
-    parser.add_argument("--from-top", type=int, default=15)
+    parser.add_argument("--from-top", type=int, default=20)
     parser.add_argument("--pad", type=int, default=10)
     parser.add_argument("--fast", action="store_true")
     parser.add_argument("--no-thumbnail", action="store_true")
@@ -1715,7 +1778,7 @@ def _parse_manual_codex_args(rest: str) -> dict | None:
     parser = argparse.ArgumentParser(prog="codex", add_help=False)
     parser.add_argument("vod_id")
     parser.add_argument("top", nargs="?", type=int, default=5)
-    parser.add_argument("--from-top", type=int, default=15)
+    parser.add_argument("--from-top", type=int, default=20)
     parser.add_argument("--pad", type=int, default=10)
     parser.add_argument("--vertical", action="store_true")
     parser.add_argument("--no-crawl", action="store_true")
@@ -1984,8 +2047,8 @@ def manual_repl(args=None) -> None:
             print(f"  {_BLOOD}{'=' * 50}{_RST}")
             print(_vamp_cmd("fetch <url|id> [no-video]", "download chat + video"))
             print(_vamp_cmd("list", "show archived VODs"))
-            print(_vamp_cmd("peaks <id> [top=15]", "raw peak density"))
-            print(_vamp_cmd("score <id> [top=15]", "Siphon virality scoring"))
+            print(_vamp_cmd("peaks <id> [top=20]", "raw peak density"))
+            print(_vamp_cmd("score <id> [top=20]", "Siphon virality scoring"))
             print(_vamp_cmd("score best [limit]", "highest score in each VOD"))
             print(_vamp_cmd("score avg [limit]", "Avg. Score per VOD"))
             print(_vamp_cmd("export <id> [top=5]", "cut top clips"))
